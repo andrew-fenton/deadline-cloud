@@ -259,6 +259,8 @@ def _get_delete_files_list(
             split_key = s3_key.split("/")
             split_key_len = len(split_key)
 
+            # We need another way to check whether to include INPUT manifests
+            # they have no job_id in their key. We can use the hash in the manifest file name
             if split_key_len == ASSET_KEY_LENGTH:
                 asset_hash = split_key[-1]
                 hash = asset_hash.split(".")[0]
