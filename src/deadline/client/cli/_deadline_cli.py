@@ -23,6 +23,7 @@ from ._groups.queue_group import cli_queue
 from ._groups.worker_group import cli_worker
 from ._groups.attachment_group import cli_attachment
 from ._groups.manifest_group import cli_manifest
+from ._groups.cleanup_group import cli_cleanup
 
 logger = getLogger(__name__)
 
@@ -81,3 +82,4 @@ main.add_command(cli_worker)
 
 main.add_command(cli_attachment)
 main.add_command(cli_manifest)
+main.add_command(cli_cleanup)
