@@ -4,7 +4,7 @@ import os
 import json
 import csv
 import shutil
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List
 
 from ... import api
@@ -81,7 +81,7 @@ def cleanup_bucket(**args):
         s3, "DeadlineCloud/", bucket_name, keep_assets, set(active_job_ids)
     )
 
-    _create_batch_tag_manifest(LOCAL_TEMP_DIR_ROOT, bucket_name, delete_keys_list)
+    _create_tag_manifest(LOCAL_TEMP_DIR_ROOT, bucket_name, delete_keys_list)
     print("Created batch tag manifest.")
 
     # Cleanup merged manifests
@@ -95,7 +95,6 @@ def _download_and_merge_manifests(
 ):
     """
     We are losing the keys of manfiests to keep by merging. We can filter using the job_id though.
-    Any manifest tied to an active job_id will not be deleted.
     """
     for job_id in active_job_ids:
         s3_prefix = f"DeadlineCloud/Manifests/{farm_id}/{queue_id}/{job_id}"
@@ -119,7 +118,7 @@ def _download_and_merge_manifests(
         # Aggregate manifests
         manifests = _load_output_manifests(job_manifests_dir)
         # For the same task, different sessions produce output assets with different hashes. This means the
-        # manifests produced by the task point to different asset hashes. The merging logic loses this information because
+        # manifests produced by the same task point to different asset hashes. The merging logic loses this information because
         # we merge based on asset path, not hash. This implementation only keeps one of these output assets.
         merged_manifest = merge_asset_manifests(manifests)
         _write_manifest(merged_manifest, merged_manifest_path)
@@ -138,9 +137,11 @@ def _get_bucket_name(deadline, farm_id, queue_id):
 def _get_active_job_ids(deadline, farm_id, queue_id, retention_days=120):
     retention_days_ago = datetime.now() - timedelta(days=retention_days)
 
-    # Get all active jobs
-    # - This uses CREATED_AT which does not change if jobs are re-queued. May need to use ListJobs and
-    # filter ourselves.
+    # Get all active jobs.
+    # This uses CREATED_AT which does not change if jobs are re-queued. May need to use ListJobs and
+    # filter ourselves. Also, we need to be careful of eventual consistency. We may miss some newly
+    # submitted jobs when we search. We need to check that last_modified_date >= 120 days when we check
+    # the active files set against the bucket contents.
     response = deadline.search_jobs(
         farmId=farm_id,
         queueIds=[queue_id],
@@ -181,6 +182,7 @@ def _get_input_manifest_key(deadline, farm_id, queue_id, job_id):
     return manifest_location
 
 
+# For downloading functions, we can use transfer manager and download in parallel
 def _download_input_manifest(s3, bucket_name, job_manifest_dir, input_manifest_key):
     split_key = input_manifest_key.split("/")
     assert len(split_key) >= 1, "Input manifest key is improperly formatted"
@@ -276,7 +278,7 @@ def _get_delete_files_list(
     return delete_list
 
 
-def _create_batch_tag_manifest(write_dir, bucket_name, delete_list):
+def _create_tag_manifest(write_dir, bucket_name, delete_list):
     csv_formatted_list = []
     for obj_key in delete_list:
         csv_formatted_list.append([bucket_name, obj_key])
@@ -285,3 +287,7 @@ def _create_batch_tag_manifest(write_dir, bucket_name, delete_list):
     with open(file_path, "w", newline="") as file:
         writer = csv.writer(file)
         writer.writerows(csv_formatted_list)
+
+
+def _tag_files_to_delete(s3):
+    pass
