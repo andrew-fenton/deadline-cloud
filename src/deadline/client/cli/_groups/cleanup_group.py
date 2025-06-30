@@ -85,6 +85,7 @@ def cleanup_bucket(retention_days: int, **args):
     os.makedirs(STORAGE_PATH, exist_ok=True)
 
     active_job_ids = sweeper.get_active_job_ids(retention_days=retention_days)
+    print(active_job_ids)
 
     for job_id in active_job_ids:
         job_attachments.download_manifests(job_id)
@@ -316,32 +317,55 @@ class SweeperProcessor:
     def get_active_job_ids(self, retention_days=120) -> List[str]:
         retention_days_ago = datetime.now(timezone.utc) - timedelta(days=retention_days)
 
-        # Get all active jobs.
-        # This uses CREATED_AT which does not change if jobs are re-queued. May need to use ListJobs and
-        # filter ourselves. Also, we need to be careful of eventual consistency. We may miss some newly
-        # submitted jobs when we search. We need to check that last_modified_date >= 120 days when we compare
-        # the active files set against the bucket contents.
-        response = self.deadline.search_jobs(
-            farmId=self.farm_id,
-            queueIds=[self.queue_id],
-            itemOffset=0,
-            pageSize=100,
-            filterExpressions={
-                "filters": [
-                    {
-                        "dateTimeFilter": {
-                            "dateTime": retention_days_ago.isoformat(),
-                            "name": "CREATED_AT",
-                            "operator": "GREATER_THAN_EQUAL_TO",
-                        }
-                    }
-                ],
-                "operator": "AND",
-            },
-        )
+        active_jobs = []
+        nextToken = ""
 
-        job_ids = [job["jobId"] for job in response["jobs"]]
-        return job_ids
+        while True:
+            response = self.deadline.list_jobs(
+                farmId=self.farm_id,
+                queueId=self.queue_id,
+                nextToken=nextToken,
+                maxResults=100,
+            )
+
+            for job in response.get("jobs", []):
+                created_date = job.get("createdAt")
+                ended_date = job.get("endedAt")
+                job_id = job.get("jobId")
+                job_status = job.get("taskRunStatus")
+
+                # Keep job's files if we can't determine when it was last run
+                if not created_date and not ended_date:
+                    active_jobs.append(job_id)
+
+                elif self._run_within_retention_period(
+                    created_date, ended_date, retention_days_ago
+                ) or self._is_a_running_job(job_status):
+                    active_jobs.append(job_id)
+
+            # Break out of loop if no more jobs to list
+            nextToken = response.get("nextToken")
+            if not nextToken:
+                break
+
+        return active_jobs
+
+    def _run_within_retention_period(
+        self, created_date, ended_date, retention_days_ago
+    ) -> bool:
+        # Both dates cannot be null due to the guard before calling this function.
+        check_date = ended_date or created_date
+        return check_date >= retention_days_ago
+
+    def _is_a_running_job(self, status) -> bool:
+        return status in [
+            "PENDING",
+            "READY",
+            "ASSIGNED",
+            "STARTING",
+            "SCHEDULED",
+            "RUNNING",
+        ]
 
     def extract_files_to_keep(self, manifests: List[BaseAssetManifest]) -> List[str]:
         asset_hashes = dict()
@@ -375,7 +399,7 @@ class SweeperProcessor:
                     days=retention_days
                 )
                 last_modified_date = obj.get("LastModified")
-                if last_modified_date <= retention_date:
+                if last_modified_date >= retention_date:
                     continue
 
                 s3_key = obj.get("Key")
