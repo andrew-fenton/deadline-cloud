@@ -25,8 +25,7 @@ logger = logging.getLogger("deadline.client.cli")
 sigint_handler = SigIntHandler()
 
 DEADLINE_S3_PREFIX = "DeadlineCloud"
-LOCAL_TEMP_DIR_ROOT = os.path.expanduser("~/temp_manifests_dir")
-MERGED_MANIFESTS_DIR = os.path.join(LOCAL_TEMP_DIR_ROOT, "merged_manifests")
+LOCAL_TEMP_DIR_ROOT = os.path.expanduser("~/bucket_sweeper")
 
 ASSET_KEY_LENGTH = 3
 INPUT_MANIFEST_KEY_LENGTH = 7
