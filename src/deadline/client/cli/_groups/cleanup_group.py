@@ -85,7 +85,7 @@ def cleanup_bucket(retention_days: int, **args):
     os.makedirs(STORAGE_PATH, exist_ok=True)
 
     active_job_ids = sweeper.get_active_job_ids(retention_days=retention_days)
-    print(active_job_ids)
+    print("Active jobs:", active_job_ids)
 
     for job_id in active_job_ids:
         job_attachments.download_manifests(job_id)
@@ -240,6 +240,7 @@ class JobAttachmentsHandler(JobAttachmentsInterface):
                 break
 
         manifest_key = f"DeadlineCloud/Manifests/{manifest_location}"
+        print(manifest_key)
 
         return manifest_key
 
