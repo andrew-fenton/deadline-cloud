@@ -63,7 +63,7 @@ class SweeperProcessor:
 
         return file_path
 
-    def _upload_tag_manifest(self, manifest_path, bucket_name):
+    def _upload_tag_manifest(self, manifest_path, bucket_name, object_key):
         """
         Upload CSV manifest to S3. Overwrites existing manifest if already present.
 
@@ -74,8 +74,6 @@ class SweeperProcessor:
         Raises:
             JobAttachmentS3BotoCoreError: If any errors occur during the upload process
         """
-        object_key = "DeadlineCloud/BucketSweeper/tag_manifest.csv"
-
         try:
             self.s3.upload_file(manifest_path, bucket_name, object_key)
         except BotoCoreError as e:
@@ -104,8 +102,19 @@ class SweeperProcessor:
             bucket_name, s3_manifest_key, manifest_etag
         )
         operation = self._create_tagging_operation()
+        confirmation_required = False
+        report = {"Enabled": False}
+        priority = 10
 
-        self._submit_batch_job(account_id, role_arn, operation, manifest)
+        self._submit_batch_job(
+            account_id,
+            confirmation_required,
+            role_arn,
+            operation,
+            manifest,
+            report,
+            priority,
+        )
 
     def _get_manifest_etag(self, bucket_name, s3_manifest_key):
         """
@@ -147,7 +156,16 @@ class SweeperProcessor:
             }
         }
 
-    def _submit_batch_job(self, account_id, role_arn, operation, manifest):
+    def _submit_batch_job(
+        self,
+        account_id,
+        confirmation_required,
+        role_arn,
+        operation,
+        manifest,
+        report,
+        priority,
+    ):
         """
         Submits the batch job to AWS.
 
@@ -157,10 +175,12 @@ class SweeperProcessor:
         try:
             self.s3_control.create_job(
                 AccountId=account_id,
+                ConfirmationRequired=confirmation_required,
                 RoleArn=role_arn,
                 Operation=operation,
                 Manifest=manifest,
-                EnableManifestOutput=False,
+                Report=report,
+                Priority=priority,
             )
         except Exception as e:
             raise SweeperProcessorError(
