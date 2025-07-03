@@ -1,11 +1,16 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 
+from botocore.exceptions import BotoCoreError
 import pytest
 import shutil
 import os
 import csv
 from unittest.mock import Mock
 from deadline.job_attachments.bucket_sweeper.sweeper_processor import SweeperProcessor
+from deadline.job_attachments.exceptions import (
+    SweeperProcessorError,
+    JobAttachmentS3BotoCoreError,
+)
 
 
 @pytest.fixture
@@ -47,6 +52,24 @@ def test_dir():
 
 class TestSweeperProcessor:
 
+    def test_create_tag_manifest_empty_list(self, processor, test_dir):
+        """Test creating a tag manifest with an empty delete list."""
+        manifest_path = processor._create_tag_manifest(test_dir, "test_bucket", [])
+
+        with open(manifest_path, "r") as file:
+            assert file.read() == ""
+
+    def test_create_tag_manifest_io_error(self, processor, test_dir, monkeypatch):
+        """Test creating a tag manifest when creation fails."""
+
+        def mock_open(*args, **kwargs):
+            raise IOError("Mocked IO Error")
+
+        monkeypatch.setattr("builtins.open", mock_open)
+
+        with pytest.raises(SweeperProcessorError):
+            processor._create_tag_manifest(test_dir, "test_bucket", ["object_key"])
+
     def test_create_tag_manifest(self, processor, test_dir):
         """Create a tag manifest and validate CSV content."""
 
@@ -78,19 +101,80 @@ class TestSweeperProcessor:
             # fmt: on
 
     def test_upload_tag_manifest(self, processor, mock_clients):
-        """Uploads an existing CSV file to S3."""
+        """Test uploading an existing CSV file to S3."""
 
         manifest_path = "test/tag_manifest.csv"
         bucket_name = "test_bucket"
-        processor._upload_tag_manifest(manifest_path, bucket_name)
+        object_key = "DeadlineCloud/BucketSweeper/tag_manifest.csv"
+        processor._upload_tag_manifest(manifest_path, bucket_name, object_key)
 
         # Validate S3 call
-        expected_object_key = "DeadlineCloud/BucketSweeper/tag_manifest.csv"
         mock_clients["s3"].upload_file.assert_called_once_with(
             manifest_path,
             bucket_name,
-            expected_object_key,
+            object_key,
         )
+
+    def test_upload_tag_manifest_s3_error(self, processor, mock_clients):
+        """Test uploading manifest when s3 upload fails."""
+        mock_clients["s3"].upload_file.side_effect = BotoCoreError()
+
+        with pytest.raises(JobAttachmentS3BotoCoreError):
+            processor._upload_tag_manifest("test.csv", "test_bucket", "test_key")
+
+    def test_get_manifest_etag(self, processor, mock_clients):
+        """Test _get_manifest_etag method."""
+        mock_clients["s3"].head_object.return_value = {"ETag": "test-etag"}
+
+        etag = processor._get_manifest_etag("test_bucket", "test_key")
+        assert etag == "test-etag"
+
+        mock_clients["s3"].head_object.assert_called_once_with(
+            Bucket="test_bucket", Key="test_key"
+        )
+
+    def test_get_manifest_etag_botocore_error(self, processor, mock_clients):
+        """Test _get_manifest_etag when head_object call fails."""
+        mock_clients["s3"].head_object.side_effect = BotoCoreError()
+
+        with pytest.raises(JobAttachmentS3BotoCoreError):
+            processor._get_manifest_etag("test_bucket", "test_key")
+
+    def test_create_manifest_config(self, processor):
+        """Test _create_manifest_config method."""
+        config = processor._create_manifest_config(
+            "test_bucket", "test_key", "test-etag"
+        )
+
+        assert config == {
+            "Spec": {
+                "Format": "S3BatchOperations_CSV_20180820",
+                "Fields": ["Bucket", "Key"],
+            },
+            "Location": {
+                "ObjectArn": "arn:aws:s3:::test_bucket/test_key",
+                "ETag": "test-etag",
+            },
+        }
+
+    def test_create_tagging_operation(self, processor):
+        """Test _create_tagging_operation method."""
+        operation = processor._create_tagging_operation()
+
+        assert operation == {
+            "S3PutObjectTagging": {
+                "TagSet": [
+                    {"Key": "delete", "Value": "True"},
+                ]
+            }
+        }
+
+    def test_submit_batch_job_error(self, processor, mock_clients):
+        """Test _submit_batch_job when job creation fails."""
+        mock_clients["s3_control"].create_job.side_effect = Exception("Mocked error")
+
+        with pytest.raises(SweeperProcessorError):
+            processor._submit_batch_job("123", False, "role_arn", {}, {}, {}, 10)
 
     def test_create_batch_tag_s3_job(self, processor, mock_clients):
         """Test creating S3 batch tagging job"""
@@ -124,10 +208,16 @@ class TestSweeperProcessor:
             },
         }
 
+        expected_priority = 10
+        expected_confirmation_setting = False
+        expected_report_settings = {"Enabled": False}
+
         mock_clients["s3_control"].create_job.assert_called_once_with(
             AccountId=account_id,
+            ConfirmationRequired=expected_confirmation_setting,
             RoleArn=role_arn,
             Operation=expected_operation,
             Manifest=expected_manifest,
-            EnableManifestOutput=False,
+            Report=expected_report_settings,
+            Priority=expected_priority,
         )
