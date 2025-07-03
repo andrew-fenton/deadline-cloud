@@ -70,6 +70,7 @@ class SweeperProcessor:
         Args:
             manifest_path (str): Local path to the manifest file
             bucket_name (str): Name of the S3 bucket
+            object_key (str): S3 object key for the uploaded manifest
 
         Raises:
             JobAttachmentS3BotoCoreError: If any errors occur during the upload process
