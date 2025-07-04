@@ -3,6 +3,7 @@
 import os
 import csv
 
+from typing import List, Dict, Any
 from botocore.exceptions import BotoCoreError
 
 from ..exceptions import SweeperProcessorError, JobAttachmentS3BotoCoreError
@@ -27,7 +28,9 @@ class SweeperProcessor:
         self.job_attachments = job_attachments
         self.farm_id = farm_id
 
-    def _create_tag_manifest(self, write_directory, bucket_name, delete_list):
+    def _create_tag_manifest(
+        self, write_directory: str, bucket_name: str, delete_list: List[str]
+    ) -> str:
         """
         Creates a CSV manifest file containing object keys to be deleted.
 
@@ -37,7 +40,7 @@ class SweeperProcessor:
         Args:
             write_directory (str): Directory path where the manifest file will be created
             bucket_name (str): Name of the S3 bucket containing the objects
-            delete_list (list): List of object keys to be included in the manifest
+            delete_list (List[str]): List of object keys to be included in the manifest
 
         Returns:
             str: Full path to the created manifest file
@@ -63,7 +66,9 @@ class SweeperProcessor:
 
         return file_path
 
-    def _upload_tag_manifest(self, manifest_path, bucket_name, object_key):
+    def _upload_tag_manifest(
+        self, manifest_path: str, bucket_name: str, object_key: str
+    ) -> None:
         """
         Upload CSV manifest to S3. Overwrites existing manifest if already present.
 
@@ -83,14 +88,15 @@ class SweeperProcessor:
             )
 
     def _create_batch_tag_s3_job(
-        self, account_id, role_arn, bucket_name, s3_manifest_key
-    ):
+        self, account_id: str, role_arn: str, bucket_name: str, s3_manifest_key: str
+    ) -> None:
         """
         Creates an S3 Batch Operations job to tag objects for deletion.
 
         Args:
             account_id (str): AWS account ID where the batch job will run
-            role_arn (str): IAM role ARN with permissions to execute the batch operation
+            role_arn (str): IAM role ARN with permissions to execute the batch operation.
+                See _submit_tagging_batch_job() function documentation for required IAM permissions.
             bucket_name (str): S3 bucket containing the manifest file
             s3_manifest_key (str): Object key of the manifest file in S3
 
@@ -102,22 +108,16 @@ class SweeperProcessor:
         manifest = self._create_manifest_config(
             bucket_name, s3_manifest_key, manifest_etag
         )
-        operation = self._create_tagging_operation()
-        confirmation_required = False
-        report = {"Enabled": False}
-        priority = 10
+        operation = self._create_delete_tagging_operation()
 
-        self._submit_batch_job(
-            account_id,
-            confirmation_required,
-            role_arn,
-            operation,
-            manifest,
-            report,
-            priority,
+        self._submit_tagging_batch_job(
+            account_id=account_id,
+            role_arn=role_arn,
+            operation=operation,
+            manifest=manifest,
         )
 
-    def _get_manifest_etag(self, bucket_name, s3_manifest_key):
+    def _get_manifest_etag(self, bucket_name: str, s3_manifest_key: str) -> str:
         """
         Retrieves the ETag for the manifest file from S3.
 
@@ -134,7 +134,9 @@ class SweeperProcessor:
                 action="querying head object", error_details=str(e)
             )
 
-    def _create_manifest_config(self, bucket_name, s3_manifest_key, manifest_etag):
+    def _create_manifest_config(
+        self, bucket_name: str, s3_manifest_key: str, manifest_etag: str
+    ) -> Dict[str, Any]:
         """Creates the manifest configuration for the batch job."""
         return {
             "Spec": {
@@ -147,7 +149,7 @@ class SweeperProcessor:
             },
         }
 
-    def _create_tagging_operation(self):
+    def _create_delete_tagging_operation(self) -> Dict[str, Any]:
         """Creates the tagging operation configuration."""
         return {
             "S3PutObjectTagging": {
@@ -157,29 +159,45 @@ class SweeperProcessor:
             }
         }
 
-    def _submit_batch_job(
+    def _submit_tagging_batch_job(
         self,
-        account_id,
-        confirmation_required,
-        role_arn,
-        operation,
-        manifest,
-        report,
-        priority,
-    ):
+        account_id: str,
+        role_arn: str,
+        operation: Dict[str, Any],
+        manifest: Dict[str, Any],
+        confirmation_required: bool = False,
+        report: Dict[str, Any] = {"Enabled": False},
+        priority: int = 10,
+    ) -> None:
         """
         Submits the batch job to AWS.
 
+        Args:
+            account_id (str): The AWS account ID where the job will be created
+            role_arn (str): The ARN of the IAM role that will be used to execute the job.
+                Requires permissions:
+                    s3:GetObject,
+                    s3:PutObjectTagging,
+                    s3:CreateJob,
+            operation (Dict[str, Any]): The operation to be performed by the batch job
+            manifest (Dict[str, Any]): The manifest specifying the objects to be processed
+            confirmation_required (bool, optional): Whether manual confirmation is needed before job execution. Defaults to False.
+            report (Dict[str, Any], optional): Configuration for job completion report. Defaults to {"Enabled": False}.
+            priority (int, optional): The priority of the job (1-255, higher values = higher priority). Defaults to 10.
+
         Raises:
             SweeperProcessorError: When job creation fails
+
+        Note:
+            The CLI client requires s3:CreateJob and iam:PassRole permissions to create a batch tagging job.
         """
         try:
             self.s3_control.create_job(
                 AccountId=account_id,
-                ConfirmationRequired=confirmation_required,
                 RoleArn=role_arn,
                 Operation=operation,
                 Manifest=manifest,
+                ConfirmationRequired=confirmation_required,
                 Report=report,
                 Priority=priority,
             )
