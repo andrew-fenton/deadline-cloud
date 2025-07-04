@@ -2,7 +2,6 @@
 
 from botocore.exceptions import BotoCoreError
 import pytest
-import shutil
 import os
 import csv
 from unittest.mock import Mock
@@ -39,15 +38,12 @@ def processor(mock_clients):
 
 
 @pytest.fixture
-def test_dir():
+def test_dir(tmp_path):
     """Create and cleanup a test directory."""
-    temp_dir = "./bucket_sweeper_test"
-    os.makedirs(temp_dir, exist_ok=True)
+    test_directory = tmp_path / "bucket_sweeper_test"
+    test_directory.mkdir(exist_ok=True)
 
-    yield temp_dir
-
-    if os.path.exists(temp_dir):
-        shutil.rmtree(temp_dir)
+    return test_directory
 
 
 class TestSweeperProcessor:
@@ -157,9 +153,9 @@ class TestSweeperProcessor:
             },
         }
 
-    def test_create_tagging_operation(self, processor):
-        """Test _create_tagging_operation method."""
-        operation = processor._create_tagging_operation()
+    def test_create_delete_tagging_operation(self, processor):
+        """Test _create_delete_tagging_operation method."""
+        operation = processor._create_delete_tagging_operation()
 
         assert operation == {
             "S3PutObjectTagging": {
@@ -169,12 +165,14 @@ class TestSweeperProcessor:
             }
         }
 
-    def test_submit_batch_job_error(self, processor, mock_clients):
-        """Test _submit_batch_job when job creation fails."""
+    def test_submit_tagging_batch_job_error(self, processor, mock_clients):
+        """Test _submit_tagging_batch_job when job creation fails."""
         mock_clients["s3_control"].create_job.side_effect = Exception("Mocked error")
 
         with pytest.raises(SweeperProcessorError):
-            processor._submit_batch_job("123", False, "role_arn", {}, {}, {}, 10)
+            processor._submit_tagging_batch_job(
+                "123", False, "role_arn", {}, {}, {}, 10
+            )
 
     def test_create_batch_tag_s3_job(self, processor, mock_clients):
         """Test creating S3 batch tagging job"""
