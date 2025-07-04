@@ -13,6 +13,10 @@ from deadline.job_attachments.exceptions import (
     JobAttachmentS3BotoCoreError,
 )
 
+@pytest.fixture
+def mock_boto3_session():
+    """Fixture to create mock AWS boto3 session"""
+    return Mock()
 
 @pytest.fixture
 def mock_s3() -> Mock:
@@ -30,9 +34,10 @@ def mock_deadline() -> Mock:
     return Mock()
 
 @pytest.fixture
-def processor(mock_s3, mock_s3_control, mock_deadline) -> JobAttachmentsSweeper:
+def processor(mock_boto3_session, mock_s3, mock_s3_control, mock_deadline) -> JobAttachmentsSweeper:
     """Fixture to create JobAttachmentsSweeper instance with mock clients"""
     return JobAttachmentsSweeper(
+        boto3_session=mock_boto3_session,
         s3_client=mock_s3,
         s3_control_client=mock_s3_control,
         deadline_client=mock_deadline,

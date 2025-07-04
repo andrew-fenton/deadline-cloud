@@ -2,12 +2,19 @@
 
 import os
 import csv
+import boto3
+from typing import Dict, List
 
 from typing import List, Dict, Any
 from botocore.exceptions import BotoCoreError
 from botocore.client import BaseClient
 
 from ..exceptions import JobAttachmentsSweeperError, JobAttachmentS3BotoCoreError
+from deadline.client.exceptions import DeadlineOperationError
+from deadline.client.api._list_jobs_recent_by_timestamp_field import (
+    JobFetchFailure,
+    _list_jobs_recent_by_timestamp_field,
+)
 
 
 class JobAttachmentsSweeper:
@@ -15,6 +22,7 @@ class JobAttachmentsSweeper:
 
     def __init__(
         self,
+        boto3_session: boto3.Session,
         s3_client: BaseClient,
         s3_control_client: BaseClient,
         deadline_client: BaseClient,
@@ -27,6 +35,7 @@ class JobAttachmentsSweeper:
         Initializes the JobAttachmentsSweeper.
 
         Args:
+            boto3_session: AWS boto3 session
             s3_client: AWS S3 client for basic S3 operations
             s3_control_client: AWS S3 Control client for batch operations
             deadline_client: Client for interacting with Deadline
@@ -39,6 +48,7 @@ class JobAttachmentsSweeper:
                     - s3:CreateJob
             bucket_name (str): target S3 bucket to cleanup
         """
+        self.boto3_session = boto3_session
         self.s3 = s3_client
         self.s3_control = s3_control_client
         self.deadline = deadline_client
@@ -46,6 +56,31 @@ class JobAttachmentsSweeper:
         self.account_id = account_id
         self.role_arn = role_arn
         self.bucket_name = bucket_name
+
+    def _get_active_job_ids(
+        self, queue_ids, retention_datetime
+    ) -> Dict[str, List[str]]:
+        queue_job_id_map: Dict[str, List[str]] = {}
+
+        for queue_id in queue_ids:
+            try:
+                jobs = _list_jobs_recent_by_timestamp_field(
+                    self.boto3_session,
+                    self.farm_id,
+                    queue_id,
+                    "endedAt",
+                    timestamp=retention_datetime,
+                )
+            except (DeadlineOperationError, JobFetchFailure) as err:
+                raise SweeperProcessorError(
+                    f"Failed to fetch active job ids for {queue_id}: {str(err)}"
+                ) from err
+
+            extracted_job_ids = [job["jobId"] for job in jobs]
+
+            queue_job_id_map[queue_id] = extracted_job_ids
+
+        return queue_job_id_map
 
     def _create_tag_manifest(self, file_path: str, delete_list: List[str]) -> None:
         """
