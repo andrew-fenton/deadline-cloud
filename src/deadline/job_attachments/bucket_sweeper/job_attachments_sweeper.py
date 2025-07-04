@@ -72,7 +72,7 @@ class JobAttachmentsSweeper:
                     timestamp=retention_datetime,
                 )
             except (DeadlineOperationError, JobFetchFailure) as err:
-                raise SweeperProcessorError(
+                raise JobAttachmentsSweeperError(
                     f"Failed to fetch active job ids for {queue_id}: {str(err)}"
                 ) from err
 

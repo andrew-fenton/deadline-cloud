@@ -1,11 +1,14 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 
 from botocore.exceptions import BotoCoreError
+from deadline.client.api._list_jobs_recent_by_timestamp_field import JobFetchFailure
+from deadline.client.exceptions import DeadlineOperationError
 import pytest
 import os
 import csv
 from typing import Dict, List, Any
 from pathlib import Path
+from datetime import datetime, timezone
 from unittest.mock import Mock
 from deadline.job_attachments.bucket_sweeper.job_attachments_sweeper import JobAttachmentsSweeper
 from deadline.job_attachments.exceptions import (
@@ -58,9 +61,88 @@ def test_dir(tmp_path: Path) -> Path:
 
 
 class TestJobAttachmentsSweeper:
-    def test_create_tag_manifest_empty_list(
-        self, processor: JobAttachmentsSweeper, test_dir: Path
-    ):
+
+    def test_get_active_job_ids_empty_queue_list(self, processor):
+        """Test behavior with empty queue list."""
+        result = processor._get_active_job_ids([], datetime.now(timezone.utc))
+        assert result == {}
+
+    def test_get_active_job_ids_empty_jobs_response(self, processor, monkeypatch):
+        """Test behavior when no jobs are returned."""
+
+        def mock_list_jobs_recent_by_timestamp_field(*args, **kwargs):
+            return []
+
+        monkeypatch.setattr(
+            f"{processor.__module__}._list_jobs_recent_by_timestamp_field",
+            mock_list_jobs_recent_by_timestamp_field,
+        )
+
+        result = processor._get_active_job_ids(["queue-1"], datetime.now(timezone.utc))
+        assert result == {"queue-1": []}
+
+    def test_get_active_job_ids_deadline_error(self, processor, monkeypatch):
+        """Test get active job ids when listing function fails."""
+
+        # Setup mock function response
+        def mock_list_jobs_recent_by_timestamp_field(*args, **kwargs):
+            raise DeadlineOperationError()
+
+        monkeypatch.setattr(
+            f"{processor.__module__}._list_jobs_recent_by_timestamp_field",
+            mock_list_jobs_recent_by_timestamp_field,
+        )
+
+        with pytest.raises(JobAttachmentsSweeperError):
+            processor._get_active_job_ids(
+                ["queue-1"], retention_datetime=datetime.now(timezone.utc)
+            )
+
+    def test_get_active_job_ids_job_fetch_failure_error(self, processor, monkeypatch):
+        """Test get active job ids when listing function fails."""
+
+        # Setup mock function response
+        def mock_list_jobs_recent_by_timestamp_field(*args, **kwargs):
+            raise JobFetchFailure()
+
+        monkeypatch.setattr(
+            f"{processor.__module__}._list_jobs_recent_by_timestamp_field",
+            mock_list_jobs_recent_by_timestamp_field,
+        )
+
+        with pytest.raises(JobAttachmentsSweeperError):
+            processor._get_active_job_ids(
+                ["queue-1"], retention_datetime=datetime.now(timezone.utc)
+            )
+
+    def test_get_active_job_ids(self, processor, monkeypatch):
+        """Test getting job ids for multiple queues."""
+
+        # Setup mock function response
+        def mock_list_jobs_recent_by_timestamp_field(*args, **kwargs):
+            return [{"jobId": "job-1"}, {"jobId": "job-2"}]
+
+        monkeypatch.setattr(
+            f"{processor.__module__}._list_jobs_recent_by_timestamp_field",
+            mock_list_jobs_recent_by_timestamp_field,
+        )
+
+        # Call method
+        queue_ids = ["queue-1", "queue-2", "queue-3"]
+        retention_datetime = datetime.now(timezone.utc)
+        result = processor._get_active_job_ids(
+            queue_ids, retention_datetime=retention_datetime
+        )
+
+        expected_result = {
+            "queue-1": ["job-1", "job-2"],
+            "queue-2": ["job-1", "job-2"],
+            "queue-3": ["job-1", "job-2"],
+        }
+        assert list(result.keys()) == list(expected_result.keys())
+        assert list(result.values()) == list(expected_result.values())
+
+    def test_create_tag_manifest_empty_list(self, processor: JobAttachmentsSweeper, test_dir: Path):
         """Test creating a tag manifest with an empty delete list."""
         test_file_path = test_dir / "empty_manifest.csv"
         manifest_path: str = processor._create_tag_manifest(str(test_file_path), [])
