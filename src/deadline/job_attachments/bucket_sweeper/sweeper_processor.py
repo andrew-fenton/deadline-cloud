@@ -19,10 +19,10 @@ class SweeperProcessor:
         deadline_client,
         storage,
         job_attachments,
-        farm_id,
-        account_id,
-        role_arn,
-        bucket_name,
+        farm_id: str,
+        account_id: str,
+        role_arn: str,
+        bucket_name: str,
     ):
         """
         Initializes the SweeperProcessor.
