@@ -110,8 +110,6 @@ class SweeperProcessor:
         Creates an S3 Batch Operations job to tag objects for deletion.
 
         Args:
-            role_arn (str): IAM role ARN with permissions to execute the batch operation.
-                See _submit_tagging_batch_job() function documentation for required IAM permissions.
             s3_manifest_key (str): Object key of the manifest file in S3
 
         Raises:
