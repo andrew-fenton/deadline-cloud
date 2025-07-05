@@ -34,6 +34,9 @@ def processor(mock_clients):
         storage=mock_clients["storage"],
         job_attachments=mock_clients["job_attachments"],
         farm_id="test-farm",
+        account_id="test-account-id",
+        role_arn="test-role-arn",
+        bucket_name="test-bucket",
     )
 
 
@@ -47,10 +50,9 @@ def test_dir(tmp_path):
 
 
 class TestSweeperProcessor:
-
     def test_create_tag_manifest_empty_list(self, processor, test_dir):
         """Test creating a tag manifest with an empty delete list."""
-        manifest_path = processor._create_tag_manifest(test_dir, "test_bucket", [])
+        manifest_path = processor._create_tag_manifest(test_dir, [])
 
         with open(manifest_path, "r") as file:
             assert file.read() == ""
@@ -64,22 +66,19 @@ class TestSweeperProcessor:
         monkeypatch.setattr("builtins.open", mock_open)
 
         with pytest.raises(SweeperProcessorError):
-            processor._create_tag_manifest(test_dir, "test_bucket", ["object_key"])
+            processor._create_tag_manifest(test_dir, ["object_key"])
 
     def test_create_tag_manifest(self, processor, test_dir):
         """Create a tag manifest and validate CSV content."""
 
         # Sample data
-        bucket_name = "test_bucket"
         delete_list = [
             "DeadlineCloud/Manifests/farm-123/queue-123/job-123/step-123/session/456_output",
             "DeadlineCloud/Manifests/farm-123/queue-123/Inputs/123/456_input",
             "DeadlineCloud/Data/hash.xx128",
         ]
 
-        manifest_path = processor._create_tag_manifest(
-            test_dir, bucket_name, delete_list
-        )
+        manifest_path = processor._create_tag_manifest(test_dir, delete_list)
 
         assert os.path.exists(manifest_path)
 
@@ -90,9 +89,9 @@ class TestSweeperProcessor:
 
             # fmt: off
             assert sorted(rows) == sorted([
-                    ["test_bucket", "DeadlineCloud/Manifests/farm-123/queue-123/job-123/step-123/session/456_output"],
-                    ["test_bucket", "DeadlineCloud/Manifests/farm-123/queue-123/Inputs/123/456_input"],
-                    ["test_bucket", "DeadlineCloud/Data/hash.xx128"],
+                    ["test-bucket", "DeadlineCloud/Manifests/farm-123/queue-123/job-123/step-123/session/456_output"],
+                    ["test-bucket", "DeadlineCloud/Manifests/farm-123/queue-123/Inputs/123/456_input"],
+                    ["test-bucket", "DeadlineCloud/Data/hash.xx128"],
             ])
             # fmt: on
 
@@ -100,14 +99,13 @@ class TestSweeperProcessor:
         """Test uploading an existing CSV file to S3."""
 
         manifest_path = "test/tag_manifest.csv"
-        bucket_name = "test_bucket"
         object_key = "DeadlineCloud/BucketSweeper/tag_manifest.csv"
-        processor._upload_tag_manifest(manifest_path, bucket_name, object_key)
+        processor._upload_tag_manifest(manifest_path, object_key)
 
         # Validate S3 call
         mock_clients["s3"].upload_file.assert_called_once_with(
             manifest_path,
-            bucket_name,
+            "test-bucket",
             object_key,
         )
 
@@ -116,17 +114,17 @@ class TestSweeperProcessor:
         mock_clients["s3"].upload_file.side_effect = BotoCoreError()
 
         with pytest.raises(JobAttachmentS3BotoCoreError):
-            processor._upload_tag_manifest("test.csv", "test_bucket", "test_key")
+            processor._upload_tag_manifest("test.csv", "test_key")
 
     def test_get_manifest_etag(self, processor, mock_clients):
         """Test _get_manifest_etag method."""
         mock_clients["s3"].head_object.return_value = {"ETag": "test-etag"}
 
-        etag = processor._get_manifest_etag("test_bucket", "test_key")
+        etag = processor._get_manifest_etag("test_key")
         assert etag == "test-etag"
 
         mock_clients["s3"].head_object.assert_called_once_with(
-            Bucket="test_bucket", Key="test_key"
+            Bucket="test-bucket", Key="test_key"
         )
 
     def test_get_manifest_etag_botocore_error(self, processor, mock_clients):
@@ -134,13 +132,11 @@ class TestSweeperProcessor:
         mock_clients["s3"].head_object.side_effect = BotoCoreError()
 
         with pytest.raises(JobAttachmentS3BotoCoreError):
-            processor._get_manifest_etag("test_bucket", "test_key")
+            processor._get_manifest_etag("test_key")
 
     def test_create_manifest_config(self, processor):
         """Test _create_manifest_config method."""
-        config = processor._create_manifest_config(
-            "test_bucket", "test_key", "test-etag"
-        )
+        config = processor._create_manifest_config("test_key", "test-etag")
 
         assert config == {
             "Spec": {
@@ -148,7 +144,7 @@ class TestSweeperProcessor:
                 "Fields": ["Bucket", "Key"],
             },
             "Location": {
-                "ObjectArn": "arn:aws:s3:::test_bucket/test_key",
+                "ObjectArn": "arn:aws:s3:::test-bucket/test_key",
                 "ETag": "test-etag",
             },
         }
@@ -170,25 +166,18 @@ class TestSweeperProcessor:
         mock_clients["s3_control"].create_job.side_effect = Exception("Mocked error")
 
         with pytest.raises(SweeperProcessorError):
-            processor._submit_tagging_batch_job(
-                "123", False, "role_arn", {}, {}, {}, 10
-            )
+            processor._submit_tagging_batch_job(False, {}, {}, {}, 10)
 
     def test_create_batch_tag_s3_job(self, processor, mock_clients):
         """Test creating S3 batch tagging job"""
         # Test data
-        account_id = "123456789"
-        role_arn = "arn:aws:iam::123456789:role/test-role"
-        bucket_name = "test_bucket"
         s3_manifest_key = "test/test.csv"
 
         # Mock S3 head_object response
         mock_clients["s3"].head_object.return_value = {"ETag": "test-etag"}
 
         # Call method
-        processor._create_batch_tag_s3_job(
-            account_id, role_arn, bucket_name, s3_manifest_key
-        )
+        processor._create_batch_tag_s3_job(s3_manifest_key)
 
         # Verify S3 Control create_job was called correctly
         expected_operation = {
@@ -201,7 +190,7 @@ class TestSweeperProcessor:
                 "Fields": ["Bucket", "Key"],
             },
             "Location": {
-                "ObjectArn": f"arn:aws:s3:::{bucket_name}/{s3_manifest_key}",
+                "ObjectArn": f"arn:aws:s3:::test-bucket/{s3_manifest_key}",
                 "ETag": "test-etag",
             },
         }
@@ -211,11 +200,11 @@ class TestSweeperProcessor:
         expected_report_settings = {"Enabled": False}
 
         mock_clients["s3_control"].create_job.assert_called_once_with(
-            AccountId=account_id,
-            ConfirmationRequired=expected_confirmation_setting,
-            RoleArn=role_arn,
+            AccountId="test-account-id",
+            RoleArn="test-role-arn",
             Operation=expected_operation,
             Manifest=expected_manifest,
+            ConfirmationRequired=expected_confirmation_setting,
             Report=expected_report_settings,
             Priority=expected_priority,
         )

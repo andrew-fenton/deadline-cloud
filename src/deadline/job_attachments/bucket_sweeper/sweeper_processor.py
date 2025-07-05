@@ -20,17 +20,39 @@ class SweeperProcessor:
         storage,
         job_attachments,
         farm_id,
+        account_id,
+        role_arn,
+        bucket_name,
     ):
+        """
+        Initializes the SweeperProcessor.
+
+        Args:
+            s3_client: AWS S3 client for basic S3 operations
+            s3_control_client: AWS S3 Control client for batch operations
+            deadline_client: Client for interacting with Deadline
+            storage: Storage interface object
+            job_attachments: Job attachments interface object
+            farm_id (str): The target farm_id to cleanup
+            account_id (str): AWS account ID for the batch operation
+            role_arn (str): The ARN of the IAM role for executing batch jobs.
+                Required permissions:
+                    - s3:GetObject
+                    - s3:PutObjectTagging
+                    - s3:CreateJob
+            bucket_name (str): target S3 bucket to cleanup
+        """
         self.s3 = s3_client
         self.s3_control = s3_control_client
         self.deadline = deadline_client
         self.storage = storage
         self.job_attachments = job_attachments
         self.farm_id = farm_id
+        self.account_id = account_id
+        self.role_arn = role_arn
+        self.bucket_name = bucket_name
 
-    def _create_tag_manifest(
-        self, write_directory: str, bucket_name: str, delete_list: List[str]
-    ) -> str:
+    def _create_tag_manifest(self, write_directory: str, delete_list: List[str]) -> str:
         """
         Creates a CSV manifest file containing object keys to be deleted.
 
@@ -39,7 +61,6 @@ class SweeperProcessor:
 
         Args:
             write_directory (str): Directory path where the manifest file will be created
-            bucket_name (str): Name of the S3 bucket containing the objects
             delete_list (List[str]): List of object keys to be included in the manifest
 
         Returns:
@@ -51,7 +72,7 @@ class SweeperProcessor:
         """
         csv_formatted_list = []
         for obj_key in delete_list:
-            csv_formatted_list.append([bucket_name, obj_key])
+            csv_formatted_list.append([self.bucket_name, obj_key])
 
         file_path = os.path.join(write_directory, "tag_manifest.csv")
 
@@ -66,58 +87,47 @@ class SweeperProcessor:
 
         return file_path
 
-    def _upload_tag_manifest(
-        self, manifest_path: str, bucket_name: str, object_key: str
-    ) -> None:
+    def _upload_tag_manifest(self, manifest_path: str, object_key: str) -> None:
         """
         Upload CSV manifest to S3. Overwrites existing manifest if already present.
 
         Args:
             manifest_path (str): Local path to the manifest file
-            bucket_name (str): Name of the S3 bucket
             object_key (str): S3 object key for the uploaded manifest
 
         Raises:
             JobAttachmentS3BotoCoreError: If any errors occur during the upload process
         """
         try:
-            self.s3.upload_file(manifest_path, bucket_name, object_key)
+            self.s3.upload_file(manifest_path, self.bucket_name, object_key)
         except BotoCoreError as e:
             raise JobAttachmentS3BotoCoreError(
                 action="uploading bucket sweeper tag manifest", error_details=str(e)
             )
 
-    def _create_batch_tag_s3_job(
-        self, account_id: str, role_arn: str, bucket_name: str, s3_manifest_key: str
-    ) -> None:
+    def _create_batch_tag_s3_job(self, s3_manifest_key: str) -> None:
         """
         Creates an S3 Batch Operations job to tag objects for deletion.
 
         Args:
-            account_id (str): AWS account ID where the batch job will run
             role_arn (str): IAM role ARN with permissions to execute the batch operation.
                 See _submit_tagging_batch_job() function documentation for required IAM permissions.
-            bucket_name (str): S3 bucket containing the manifest file
             s3_manifest_key (str): Object key of the manifest file in S3
 
         Raises:
             JobAttachmentS3BotoCoreError: When retrieving manifest metadata fails
             SweeperProcessorError: When creating the batch job fails
         """
-        manifest_etag = self._get_manifest_etag(bucket_name, s3_manifest_key)
-        manifest = self._create_manifest_config(
-            bucket_name, s3_manifest_key, manifest_etag
-        )
+        manifest_etag = self._get_manifest_etag(s3_manifest_key)
+        manifest = self._create_manifest_config(s3_manifest_key, manifest_etag)
         operation = self._create_delete_tagging_operation()
 
         self._submit_tagging_batch_job(
-            account_id=account_id,
-            role_arn=role_arn,
             operation=operation,
             manifest=manifest,
         )
 
-    def _get_manifest_etag(self, bucket_name: str, s3_manifest_key: str) -> str:
+    def _get_manifest_etag(self, s3_manifest_key: str) -> str:
         """
         Retrieves the ETag for the manifest file from S3.
 
@@ -126,7 +136,7 @@ class SweeperProcessor:
         """
         try:
             manifest_metadata = self.s3.head_object(
-                Bucket=bucket_name, Key=s3_manifest_key
+                Bucket=self.bucket_name, Key=s3_manifest_key
             )
             return manifest_metadata.get("ETag")
         except BotoCoreError as e:
@@ -135,7 +145,7 @@ class SweeperProcessor:
             )
 
     def _create_manifest_config(
-        self, bucket_name: str, s3_manifest_key: str, manifest_etag: str
+        self, s3_manifest_key: str, manifest_etag: str
     ) -> Dict[str, Any]:
         """Creates the manifest configuration for the batch job."""
         return {
@@ -144,7 +154,7 @@ class SweeperProcessor:
                 "Fields": ["Bucket", "Key"],
             },
             "Location": {
-                "ObjectArn": f"arn:aws:s3:::{bucket_name}/{s3_manifest_key}",
+                "ObjectArn": f"arn:aws:s3:::{self.bucket_name}/{s3_manifest_key}",
                 "ETag": f"{manifest_etag}",
             },
         }
@@ -161,8 +171,6 @@ class SweeperProcessor:
 
     def _submit_tagging_batch_job(
         self,
-        account_id: str,
-        role_arn: str,
         operation: Dict[str, Any],
         manifest: Dict[str, Any],
         confirmation_required: bool = False,
@@ -173,12 +181,6 @@ class SweeperProcessor:
         Submits the batch job to AWS.
 
         Args:
-            account_id (str): The AWS account ID where the job will be created
-            role_arn (str): The ARN of the IAM role that will be used to execute the job.
-                Requires permissions:
-                    s3:GetObject,
-                    s3:PutObjectTagging,
-                    s3:CreateJob,
             operation (Dict[str, Any]): The operation to be performed by the batch job
             manifest (Dict[str, Any]): The manifest specifying the objects to be processed
             confirmation_required (bool, optional): Whether manual confirmation is needed before job execution. Defaults to False.
@@ -193,8 +195,8 @@ class SweeperProcessor:
         """
         try:
             self.s3_control.create_job(
-                AccountId=account_id,
-                RoleArn=role_arn,
+                AccountId=self.account_id,
+                RoleArn=self.role_arn,
                 Operation=operation,
                 Manifest=manifest,
                 ConfirmationRequired=confirmation_required,
