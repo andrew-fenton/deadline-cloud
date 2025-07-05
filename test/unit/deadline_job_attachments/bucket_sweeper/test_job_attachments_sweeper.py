@@ -130,9 +130,7 @@ class TestJobAttachmentsSweeper:
         # Call method
         queue_ids = ["queue-1", "queue-2", "queue-3"]
         retention_datetime = datetime.now(timezone.utc)
-        result = processor._get_active_job_ids(
-            queue_ids, retention_datetime=retention_datetime
-        )
+        result = processor._get_active_job_ids(queue_ids, retention_datetime=retention_datetime)
 
         expected_result = {
             "queue-1": ["job-1", "job-2"],

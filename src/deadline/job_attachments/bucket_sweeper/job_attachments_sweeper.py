@@ -3,8 +3,8 @@
 import os
 import csv
 import boto3
-from typing import Dict, List
 
+from datetime import datetime
 from typing import List, Dict, Any
 from botocore.exceptions import BotoCoreError
 from botocore.client import BaseClient
@@ -58,8 +58,23 @@ class JobAttachmentsSweeper:
         self.bucket_name = bucket_name
 
     def _get_active_job_ids(
-        self, queue_ids, retention_datetime
+        self, queue_ids: List[str], retention_datetime: datetime
     ) -> Dict[str, List[str]]:
+        """Retrieves active job IDs for specified queues that are newer than the retention date.
+
+        Args:
+            queue_ids: List of queue identifiers to check for active jobs
+            retention_datetime: Datetime threshold for considering jobs as active
+
+        Returns:
+            Dict[str, List[str]]: Mapping of queue IDs to lists of active job IDs
+                Key: Queue ID
+                Value: List of job IDs that are active in that queue
+
+        Raises:
+            SweeperProcessorError: If there is a failure fetching job IDs from Deadline, wrapping
+                either DeadlineOperationError or JobFetchFailure
+        """
         queue_job_id_map: Dict[str, List[str]] = {}
 
         for queue_id in queue_ids:
