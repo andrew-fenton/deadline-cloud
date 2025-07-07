@@ -5,6 +5,7 @@ import csv
 
 from typing import List, Dict, Any
 from botocore.exceptions import BotoCoreError
+from botocore.client import BaseClient
 
 from ..exceptions import SweeperProcessorError, JobAttachmentS3BotoCoreError
 
@@ -14,11 +15,9 @@ class SweeperProcessor:
 
     def __init__(
         self,
-        s3_client,
-        s3_control_client,
-        deadline_client,
-        storage,
-        job_attachments,
+        s3_client: BaseClient,
+        s3_control_client: BaseClient,
+        deadline_client: BaseClient,
         farm_id: str,
         account_id: str,
         role_arn: str,
@@ -31,8 +30,6 @@ class SweeperProcessor:
             s3_client: AWS S3 client for basic S3 operations
             s3_control_client: AWS S3 Control client for batch operations
             deadline_client: Client for interacting with Deadline
-            storage: Storage interface object
-            job_attachments: Job attachments interface object
             farm_id (str): The target farm_id to cleanup
             account_id (str): AWS account ID for the batch operation
             role_arn (str): The ARN of the IAM role for executing batch jobs.
@@ -45,8 +42,6 @@ class SweeperProcessor:
         self.s3 = s3_client
         self.s3_control = s3_control_client
         self.deadline = deadline_client
-        self.storage = storage
-        self.job_attachments = job_attachments
         self.farm_id = farm_id
         self.account_id = account_id
         self.role_arn = role_arn
