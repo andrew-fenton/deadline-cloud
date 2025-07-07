@@ -116,6 +116,13 @@ class TestSweeperProcessor:
         with pytest.raises(JobAttachmentS3BotoCoreError):
             processor._upload_tag_manifest("test.csv", "test_key")
 
+    def test_get_manifest_etag_value_error(self, processor, mock_clients):
+        """Test _get_manifest_etag method."""
+        mock_clients["s3"].head_object.return_value = {"ETag": None}
+
+        with pytest.raises(ValueError):
+            processor._get_manifest_etag("test_key")
+
     def test_get_manifest_etag(self, processor, mock_clients):
         """Test _get_manifest_etag method."""
         mock_clients["s3"].head_object.return_value = {"ETag": "test-etag"}
@@ -123,9 +130,7 @@ class TestSweeperProcessor:
         etag = processor._get_manifest_etag("test_key")
         assert etag == "test-etag"
 
-        mock_clients["s3"].head_object.assert_called_once_with(
-            Bucket="test-bucket", Key="test_key"
-        )
+        mock_clients["s3"].head_object.assert_called_once_with(Bucket="test-bucket", Key="test_key")
 
     def test_get_manifest_etag_botocore_error(self, processor, mock_clients):
         """Test _get_manifest_etag when head_object call fails."""

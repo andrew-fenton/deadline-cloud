@@ -70,20 +70,18 @@ class SweeperProcessor:
             SweeperProcessorError: If the manifest file cannot be created due to
                 file system permissions, disk space, or other I/O errors
         """
-        csv_formatted_list = []
+        csv_formatted_list: List[List[str]] = []
         for obj_key in delete_list:
             csv_formatted_list.append([self.bucket_name, obj_key])
 
-        file_path = os.path.join(write_directory, "tag_manifest.csv")
+        file_path: str = os.path.join(write_directory, "tag_manifest.csv")
 
         try:
             with open(file_path, "w") as file:
                 writer = csv.writer(file)
                 writer.writerows(csv_formatted_list)
         except Exception as e:
-            raise SweeperProcessorError(
-                message=f"Failed to create tag manifest: {str(e)}"
-            )
+            raise SweeperProcessorError(message=f"Failed to create tag manifest: {str(e)}")
 
         return file_path
 
@@ -116,9 +114,9 @@ class SweeperProcessor:
             JobAttachmentS3BotoCoreError: When retrieving manifest metadata fails
             SweeperProcessorError: When creating the batch job fails
         """
-        manifest_etag = self._get_manifest_etag(s3_manifest_key)
-        manifest = self._create_manifest_config(s3_manifest_key, manifest_etag)
-        operation = self._create_delete_tagging_operation()
+        manifest_etag: str = self._get_manifest_etag(s3_manifest_key)
+        manifest: Dict[str, Any] = self._create_manifest_config(s3_manifest_key, manifest_etag)
+        operation: Dict[str, Any] = self._create_delete_tagging_operation()
 
         self._submit_tagging_batch_job(
             operation=operation,
@@ -130,21 +128,23 @@ class SweeperProcessor:
         Retrieves the ETag for the manifest file from S3.
 
         Raises:
+            ValueError: when head_object operation succeeds but etag is None
             JobAttachmentS3BotoCoreError: When S3 head_object operation fails
         """
         try:
-            manifest_metadata = self.s3.head_object(
+            manifest_metadata: Dict[str, Any] = self.s3.head_object(
                 Bucket=self.bucket_name, Key=s3_manifest_key
             )
-            return manifest_metadata.get("ETag")
-        except BotoCoreError as e:
-            raise JobAttachmentS3BotoCoreError(
-                action="querying head object", error_details=str(e)
-            )
 
-    def _create_manifest_config(
-        self, s3_manifest_key: str, manifest_etag: str
-    ) -> Dict[str, Any]:
+            etag: str = manifest_metadata.get("ETag", "")
+            if not etag:
+                raise ValueError("Missing required Etag in manifest metadata")
+
+            return etag
+        except BotoCoreError as e:
+            raise JobAttachmentS3BotoCoreError(action="querying head object", error_details=str(e))
+
+    def _create_manifest_config(self, s3_manifest_key: str, manifest_etag: str) -> Dict[str, Any]:
         """Creates the manifest configuration for the batch job."""
         return {
             "Spec": {
@@ -202,6 +202,4 @@ class SweeperProcessor:
                 Priority=priority,
             )
         except Exception as e:
-            raise SweeperProcessorError(
-                f"Failed to create S3 batch operations job: {str(e)}"
-            )
+            raise SweeperProcessorError(f"Failed to create S3 batch operations job: {str(e)}")
