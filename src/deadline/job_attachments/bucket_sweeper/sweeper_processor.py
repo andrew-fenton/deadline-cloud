@@ -47,19 +47,16 @@ class JobAttachmentsSweeper:
         self.role_arn = role_arn
         self.bucket_name = bucket_name
 
-    def _create_tag_manifest(self, write_directory: str, delete_list: List[str]) -> str:
+    def _create_tag_manifest(self, file_path: str, delete_list: List[str]) -> None:
         """
-        Creates a CSV manifest file containing object keys to be deleted.
+        Creates a CSV manifest file containing object keys to be deleted and writes it to
+        the specified path on disk.
 
-        The manifest is created in the specified directory with the filename 'tag_manifest.csv'.
         Each row in the CSV contains two columns: bucket name and object key.
 
         Args:
-            write_directory (str): Directory path where the manifest file will be created
+            write_path (str): File path where the manifest file will be created
             delete_list (List[str]): List of object keys to be included in the manifest
-
-        Returns:
-            str: Full path to the created manifest file
 
         Raises:
             JobAttachmentsSweeperError: If the manifest file cannot be created due to
@@ -68,8 +65,6 @@ class JobAttachmentsSweeper:
         csv_formatted_list: List[List[str]] = []
         for obj_key in delete_list:
             csv_formatted_list.append([self.bucket_name, obj_key])
-
-        file_path: str = os.path.join(write_directory, "tag_manifest.csv")
 
         try:
             with open(file_path, "w") as file:

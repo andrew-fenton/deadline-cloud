@@ -54,7 +54,8 @@ class TestJobAttachmentsSweeper:
         self, processor: JobAttachmentsSweeper, test_dir: Path
     ):
         """Test creating a tag manifest with an empty delete list."""
-        manifest_path: str = processor._create_tag_manifest(str(test_dir), [])
+        test_file_path = test_dir / "empty_manifest.csv"
+        manifest_path: str = processor._create_tag_manifest(str(test_file_path), [])
 
         with open(manifest_path, "r") as file:
             assert file.read() == ""
@@ -72,8 +73,11 @@ class TestJobAttachmentsSweeper:
 
         monkeypatch.setattr("builtins.open", mock_open)
 
-        with pytest.raises(JobAttachmentsSweeperError):
+        with pytest.raises(JobAttachmentsSweeperError) as raised_error:
             processor._create_tag_manifest(str(test_dir), ["object_key"])
+
+            assert str(raised_error) == "Mocked IO Error"
+
 
     def test_create_tag_manifest(self, processor: JobAttachmentsSweeper, test_dir: Path):
         """Create a tag manifest and validate CSV content."""
@@ -85,7 +89,8 @@ class TestJobAttachmentsSweeper:
             "DeadlineCloud/Data/hash.xx128",
         ]
 
-        manifest_path: str = processor._create_tag_manifest(str(test_dir), delete_list)
+        test_file_path = test_dir / "tag_manifest.csv"
+        manifest_path: str = processor._create_tag_manifest(str(test_file_path), delete_list)
 
         assert os.path.exists(manifest_path)
 
@@ -94,13 +99,13 @@ class TestJobAttachmentsSweeper:
             reader = csv.reader(file)
             rows: List[List[str]] = list(reader)
 
-            # fmt: off
-            assert sorted(rows) == sorted([
-                    ["test-bucket", "DeadlineCloud/Manifests/farm-123/queue-123/job-123/step-123/session/456_output"],
-                    ["test-bucket", "DeadlineCloud/Manifests/farm-123/queue-123/Inputs/123/456_input"],
-                    ["test-bucket", "DeadlineCloud/Data/hash.xx128"],
-            ])
-            # fmt: on
+        # fmt: off
+        assert sorted(rows) == sorted([
+                ["test-bucket", "DeadlineCloud/Manifests/farm-123/queue-123/job-123/step-123/session/456_output"],
+                ["test-bucket", "DeadlineCloud/Manifests/farm-123/queue-123/Inputs/123/456_input"],
+                ["test-bucket", "DeadlineCloud/Data/hash.xx128"],
+        ])
+        # fmt: on
 
     def test_upload_tag_manifest(
         self, processor: JobAttachmentsSweeper, mock_clients: Dict[str, Mock]
