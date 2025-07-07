@@ -7,10 +7,10 @@ from typing import List, Dict, Any
 from botocore.exceptions import BotoCoreError
 from botocore.client import BaseClient
 
-from ..exceptions import SweeperProcessorError, JobAttachmentS3BotoCoreError
+from ..exceptions import JobAttachmentsSweeperError, JobAttachmentS3BotoCoreError
 
 
-class SweeperProcessor:
+class JobAttachmentsSweeper:
     """Processes cleanup operations for job attachments."""
 
     def __init__(
@@ -24,7 +24,7 @@ class SweeperProcessor:
         bucket_name: str,
     ):
         """
-        Initializes the SweeperProcessor.
+        Initializes the JobAttachmentsSweeper.
 
         Args:
             s3_client: AWS S3 client for basic S3 operations
@@ -62,7 +62,7 @@ class SweeperProcessor:
             str: Full path to the created manifest file
 
         Raises:
-            SweeperProcessorError: If the manifest file cannot be created due to
+            JobAttachmentsSweeperError: If the manifest file cannot be created due to
                 file system permissions, disk space, or other I/O errors
         """
         csv_formatted_list: List[List[str]] = []
@@ -76,7 +76,7 @@ class SweeperProcessor:
                 writer = csv.writer(file)
                 writer.writerows(csv_formatted_list)
         except Exception as e:
-            raise SweeperProcessorError(message=f"Failed to create tag manifest: {str(e)}")
+            raise JobAttachmentsSweeperError(message=f"Failed to create tag manifest: {str(e)}")
 
         return file_path
 
@@ -107,7 +107,7 @@ class SweeperProcessor:
 
         Raises:
             JobAttachmentS3BotoCoreError: When retrieving manifest metadata fails
-            SweeperProcessorError: When creating the batch job fails
+            JobAttachmentsSweeperError: When creating the batch job fails
         """
         manifest_etag: str = self._get_manifest_etag(s3_manifest_key)
         manifest: Dict[str, Any] = self._create_manifest_config(s3_manifest_key, manifest_etag)
@@ -181,7 +181,7 @@ class SweeperProcessor:
             priority (int, optional): The priority of the job (1-255, higher values = higher priority). Defaults to 10.
 
         Raises:
-            SweeperProcessorError: When job creation fails
+            JobAttachmentsSweeperError: When job creation fails
 
         Note:
             The CLI client requires s3:CreateJob and iam:PassRole permissions to create a batch tagging job.
@@ -197,4 +197,4 @@ class SweeperProcessor:
                 Priority=priority,
             )
         except Exception as e:
-            raise SweeperProcessorError(f"Failed to create S3 batch operations job: {str(e)}")
+            raise JobAttachmentsSweeperError(f"Failed to create S3 batch operations job: {str(e)}")

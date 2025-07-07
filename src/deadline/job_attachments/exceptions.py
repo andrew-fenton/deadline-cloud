@@ -195,7 +195,7 @@ class BucketSweeperError(Exception):
         super().__init__(message)
 
 
-class SweeperProcessorError(BucketSweeperError):
+class JobAttachmentsSweeperError(BucketSweeperError):
     """
     Exception for manifest processing in bucket sweeper.
     """

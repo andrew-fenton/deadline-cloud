@@ -7,9 +7,9 @@ import csv
 from typing import Dict, List, Any
 from pathlib import Path
 from unittest.mock import Mock
-from deadline.job_attachments.bucket_sweeper.sweeper_processor import SweeperProcessor
+from deadline.job_attachments.bucket_sweeper.sweeper_processor import JobAttachmentsSweeper
 from deadline.job_attachments.exceptions import (
-    SweeperProcessorError,
+    JobAttachmentsSweeperError,
     JobAttachmentS3BotoCoreError,
 )
 
@@ -27,9 +27,9 @@ def mock_clients() -> Dict[str, Mock]:
 
 
 @pytest.fixture
-def processor(mock_clients: Dict[str, Mock]) -> SweeperProcessor:
-    """Fixture to create SweeperProcessor instance with mock clients"""
-    return SweeperProcessor(
+def processor(mock_clients: Dict[str, Mock]) -> JobAttachmentsSweeper:
+    """Fixture to create JobAttachmentsSweeper instance with mock clients"""
+    return JobAttachmentsSweeper(
         s3_client=mock_clients["s3"],
         s3_control_client=mock_clients["s3_control"],
         deadline_client=mock_clients["deadline"],
@@ -49,9 +49,9 @@ def test_dir(tmp_path: Path) -> Path:
     return test_directory
 
 
-class TestSweeperProcessor:
+class TestJobAttachmentsSweeper:
     def test_create_tag_manifest_empty_list(
-        self, processor: SweeperProcessor, test_dir: Path
+        self, processor: JobAttachmentsSweeper, test_dir: Path
     ):
         """Test creating a tag manifest with an empty delete list."""
         manifest_path: str = processor._create_tag_manifest(str(test_dir), [])
@@ -61,7 +61,7 @@ class TestSweeperProcessor:
 
     def test_create_tag_manifest_io_error(
         self,
-        processor: SweeperProcessor,
+        processor: JobAttachmentsSweeper,
         test_dir: Path,
         monkeypatch: pytest.MonkeyPatch,
     ):
@@ -72,10 +72,10 @@ class TestSweeperProcessor:
 
         monkeypatch.setattr("builtins.open", mock_open)
 
-        with pytest.raises(SweeperProcessorError):
+        with pytest.raises(JobAttachmentsSweeperError):
             processor._create_tag_manifest(str(test_dir), ["object_key"])
 
-    def test_create_tag_manifest(self, processor: SweeperProcessor, test_dir: Path):
+    def test_create_tag_manifest(self, processor: JobAttachmentsSweeper, test_dir: Path):
         """Create a tag manifest and validate CSV content."""
 
         # Sample data
@@ -103,7 +103,7 @@ class TestSweeperProcessor:
             # fmt: on
 
     def test_upload_tag_manifest(
-        self, processor: SweeperProcessor, mock_clients: Dict[str, Mock]
+        self, processor: JobAttachmentsSweeper, mock_clients: Dict[str, Mock]
     ):
         """Test uploading an existing CSV file to S3."""
 
@@ -119,7 +119,7 @@ class TestSweeperProcessor:
         )
 
     def test_upload_tag_manifest_s3_error(
-        self, processor: SweeperProcessor, mock_clients: Dict[str, Mock]
+        self, processor: JobAttachmentsSweeper, mock_clients: Dict[str, Mock]
     ):
         """Test uploading manifest when s3 upload fails."""
         mock_clients["s3"].upload_file.side_effect = BotoCoreError()
@@ -128,7 +128,7 @@ class TestSweeperProcessor:
             processor._upload_tag_manifest("test.csv", "test_key")
 
     def test_get_manifest_etag_value_error(
-        self, processor: SweeperProcessor, mock_clients: Dict[str, Mock]
+        self, processor: JobAttachmentsSweeper, mock_clients: Dict[str, Mock]
     ):
         """Test _get_manifest_etag method."""
         mock_clients["s3"].head_object.return_value = {"ETag": None}
@@ -137,7 +137,7 @@ class TestSweeperProcessor:
             processor._get_manifest_etag("test_key")
 
     def test_get_manifest_etag(
-        self, processor: SweeperProcessor, mock_clients: Dict[str, Mock]
+        self, processor: JobAttachmentsSweeper, mock_clients: Dict[str, Mock]
     ):
         """Test _get_manifest_etag method."""
         mock_clients["s3"].head_object.return_value = {"ETag": "test-etag"}
@@ -150,7 +150,7 @@ class TestSweeperProcessor:
         )
 
     def test_get_manifest_etag_botocore_error(
-        self, processor: SweeperProcessor, mock_clients: Dict[str, Mock]
+        self, processor: JobAttachmentsSweeper, mock_clients: Dict[str, Mock]
     ):
         """Test _get_manifest_etag when head_object call fails."""
         mock_clients["s3"].head_object.side_effect = BotoCoreError()
@@ -158,7 +158,7 @@ class TestSweeperProcessor:
         with pytest.raises(JobAttachmentS3BotoCoreError):
             processor._get_manifest_etag("test_key")
 
-    def test_create_manifest_config(self, processor: SweeperProcessor):
+    def test_create_manifest_config(self, processor: JobAttachmentsSweeper):
         """Test _create_manifest_config method."""
         config: Dict[str, Any] = processor._create_manifest_config(
             "test_key", "test-etag"
@@ -175,7 +175,7 @@ class TestSweeperProcessor:
             },
         }
 
-    def test_create_delete_tagging_operation(self, processor: SweeperProcessor):
+    def test_create_delete_tagging_operation(self, processor: JobAttachmentsSweeper):
         """Test _create_delete_tagging_operation method."""
         operation: Dict[str, Any] = processor._create_delete_tagging_operation()
 
@@ -188,16 +188,16 @@ class TestSweeperProcessor:
         }
 
     def test_submit_tagging_batch_job_error(
-        self, processor: SweeperProcessor, mock_clients: Dict[str, Mock]
+        self, processor: JobAttachmentsSweeper, mock_clients: Dict[str, Mock]
     ):
         """Test _submit_tagging_batch_job when job creation fails."""
         mock_clients["s3_control"].create_job.side_effect = Exception("Mocked error")
 
-        with pytest.raises(SweeperProcessorError):
+        with pytest.raises(JobAttachmentsSweeperError):
             processor._submit_tagging_batch_job({}, {})
 
     def test_create_batch_tag_s3_job(
-        self, processor: SweeperProcessor, mock_clients: Dict[str, Mock]
+        self, processor: JobAttachmentsSweeper, mock_clients: Dict[str, Mock]
     ):
         """Test creating S3 batch tagging job"""
         # Test data
