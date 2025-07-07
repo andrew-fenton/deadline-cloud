@@ -11,9 +11,9 @@ from botocore.client import BaseClient
 
 from ..exceptions import JobAttachmentsSweeperError, JobAttachmentS3BotoCoreError
 from deadline.client.exceptions import DeadlineOperationError
-from deadline.client.api._list_jobs_recent_by_timestamp_field import (
+from deadline.client.api._list_jobs_by_filter_expression import (
     JobFetchFailure,
-    _list_jobs_recent_by_timestamp_field,
+    _list_jobs_by_filter_expression,
 )
 
 
@@ -72,27 +72,37 @@ class JobAttachmentsSweeper:
                 Value: List of job IDs that are active in that queue
 
         Raises:
-            SweeperProcessorError: If there is a failure fetching job IDs from Deadline, wrapping
+            JobAttachmentsSweeperError: If there is a failure fetching job IDs from Deadline, wrapping
                 either DeadlineOperationError or JobFetchFailure
         """
         queue_job_id_map: Dict[str, List[str]] = {}
+        filter_expression: Dict[str, Any] = {
+            "filters": [
+                {
+                    "dateTimeFilter": {
+                        "name": "endedAt",
+                        "dateTime": retention_datetime,
+                        "operator": "GREATER_THAN_EQUAL_TO",
+                    }
+                },
+            ],
+            "operator": "AND",
+        }
 
         for queue_id in queue_ids:
             try:
-                jobs = _list_jobs_recent_by_timestamp_field(
-                    self.boto3_session,
-                    self.farm_id,
-                    queue_id,
-                    "endedAt",
-                    timestamp=retention_datetime,
+                jobs: List[Dict[str, Any]] = _list_jobs_by_filter_expression(
+                    boto3_session=self.boto3_session,
+                    farm_id=self.farm_id,
+                    queue_id=queue_id,
+                    filter_expression=filter_expression
                 )
             except (DeadlineOperationError, JobFetchFailure) as err:
                 raise JobAttachmentsSweeperError(
                     f"Failed to fetch active job ids for {queue_id}: {str(err)}"
                 ) from err
 
-            extracted_job_ids = [job["jobId"] for job in jobs]
-
+            extracted_job_ids: List[str] = [job["jobId"] for job in jobs]
             queue_job_id_map[queue_id] = extracted_job_ids
 
         return queue_job_id_map

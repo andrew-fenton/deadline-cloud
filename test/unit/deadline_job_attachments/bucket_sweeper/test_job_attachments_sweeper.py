@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 
 from botocore.exceptions import BotoCoreError
-from deadline.client.api._list_jobs_recent_by_timestamp_field import JobFetchFailure
+from deadline.client.api._list_jobs_by_filter_expression import JobFetchFailure
 from deadline.client.exceptions import DeadlineOperationError
 import pytest
 import os
@@ -64,33 +64,39 @@ class TestJobAttachmentsSweeper:
 
     def test_get_active_job_ids_empty_queue_list(self, processor):
         """Test behavior with empty queue list."""
-        result = processor._get_active_job_ids([], datetime.now(timezone.utc))
+        result: Dict[str, List[str]] = processor._get_active_job_ids([], datetime.now(timezone.utc))
         assert result == {}
 
-    def test_get_active_job_ids_empty_jobs_response(self, processor, monkeypatch):
+    def test_get_active_job_ids_empty_jobs_response(
+        self, processor: JobAttachmentsSweeper, monkeypatch: pytest.MonkeyPatch
+    ):
         """Test behavior when no jobs are returned."""
 
-        def mock_list_jobs_recent_by_timestamp_field(*args, **kwargs):
+        def mock_list_jobs_by_filter_expression(*args, **kwargs):
             return []
 
         monkeypatch.setattr(
-            f"{processor.__module__}._list_jobs_recent_by_timestamp_field",
-            mock_list_jobs_recent_by_timestamp_field,
+            f"{processor.__module__}._list_jobs_by_filter_expression",
+            mock_list_jobs_by_filter_expression,
         )
 
-        result = processor._get_active_job_ids(["queue-1"], datetime.now(timezone.utc))
+        result: Dict[str, List[str]] = processor._get_active_job_ids(
+            ["queue-1"], datetime.now(timezone.utc)
+        )
         assert result == {"queue-1": []}
 
-    def test_get_active_job_ids_deadline_error(self, processor, monkeypatch):
+    def test_get_active_job_ids_deadline_error(
+        self, processor: JobAttachmentsSweeper, monkeypatch: pytest.MonkeyPatch
+    ):
         """Test get active job ids when listing function fails."""
 
         # Setup mock function response
-        def mock_list_jobs_recent_by_timestamp_field(*args, **kwargs):
+        def mock_list_jobs_by_filter_expression(*args, **kwargs):
             raise DeadlineOperationError()
 
         monkeypatch.setattr(
-            f"{processor.__module__}._list_jobs_recent_by_timestamp_field",
-            mock_list_jobs_recent_by_timestamp_field,
+            f"{processor.__module__}._list_jobs_by_filter_expression",
+            mock_list_jobs_by_filter_expression,
         )
 
         with pytest.raises(JobAttachmentsSweeperError):
@@ -98,16 +104,18 @@ class TestJobAttachmentsSweeper:
                 ["queue-1"], retention_datetime=datetime.now(timezone.utc)
             )
 
-    def test_get_active_job_ids_job_fetch_failure_error(self, processor, monkeypatch):
+    def test_get_active_job_ids_job_fetch_failure_error(
+        self, processor: JobAttachmentsSweeper, monkeypatch: pytest.MonkeyPatch
+    ):
         """Test get active job ids when listing function fails."""
 
         # Setup mock function response
-        def mock_list_jobs_recent_by_timestamp_field(*args, **kwargs):
+        def mock_list_jobs_by_filter_expression(*args, **kwargs):
             raise JobFetchFailure()
 
         monkeypatch.setattr(
-            f"{processor.__module__}._list_jobs_recent_by_timestamp_field",
-            mock_list_jobs_recent_by_timestamp_field,
+            f"{processor.__module__}._list_jobs_by_filter_expression",
+            mock_list_jobs_by_filter_expression,
         )
 
         with pytest.raises(JobAttachmentsSweeperError):
@@ -115,24 +123,26 @@ class TestJobAttachmentsSweeper:
                 ["queue-1"], retention_datetime=datetime.now(timezone.utc)
             )
 
-    def test_get_active_job_ids(self, processor, monkeypatch):
+    def test_get_active_job_ids(self, processor: JobAttachmentsSweeper, monkeypatch: pytest.MonkeyPatch):
         """Test getting job ids for multiple queues."""
 
         # Setup mock function response
-        def mock_list_jobs_recent_by_timestamp_field(*args, **kwargs):
+        def mock_list_jobs_by_filter_expression(*args, **kwargs):
             return [{"jobId": "job-1"}, {"jobId": "job-2"}]
 
         monkeypatch.setattr(
-            f"{processor.__module__}._list_jobs_recent_by_timestamp_field",
-            mock_list_jobs_recent_by_timestamp_field,
+            f"{processor.__module__}._list_jobs_by_filter_expression",
+            mock_list_jobs_by_filter_expression,
         )
 
         # Call method
-        queue_ids = ["queue-1", "queue-2", "queue-3"]
-        retention_datetime = datetime.now(timezone.utc)
-        result = processor._get_active_job_ids(queue_ids, retention_datetime=retention_datetime)
+        queue_ids: List[str] = ["queue-1", "queue-2", "queue-3"]
+        retention_datetime: datetime = datetime.now(timezone.utc)
+        result: Dict[str, List[str]] = processor._get_active_job_ids(
+            queue_ids, retention_datetime=retention_datetime
+        )
 
-        expected_result = {
+        expected_result: Dict[str, List[str]] = {
             "queue-1": ["job-1", "job-2"],
             "queue-2": ["job-1", "job-2"],
             "queue-3": ["job-1", "job-2"],
