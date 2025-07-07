@@ -50,7 +50,9 @@ def test_dir(tmp_path: Path) -> Path:
 
 
 class TestSweeperProcessor:
-    def test_create_tag_manifest_empty_list(self, processor: SweeperProcessor, test_dir: Path):
+    def test_create_tag_manifest_empty_list(
+        self, processor: SweeperProcessor, test_dir: Path
+    ):
         """Test creating a tag manifest with an empty delete list."""
         manifest_path: str = processor._create_tag_manifest(str(test_dir), [])
 
@@ -100,7 +102,9 @@ class TestSweeperProcessor:
             ])
             # fmt: on
 
-    def test_upload_tag_manifest(self, processor: SweeperProcessor, mock_clients: Dict[str, Mock]):
+    def test_upload_tag_manifest(
+        self, processor: SweeperProcessor, mock_clients: Dict[str, Mock]
+    ):
         """Test uploading an existing CSV file to S3."""
 
         manifest_path: str = "test/tag_manifest.csv"
@@ -132,14 +136,18 @@ class TestSweeperProcessor:
         with pytest.raises(ValueError):
             processor._get_manifest_etag("test_key")
 
-    def test_get_manifest_etag(self, processor: SweeperProcessor, mock_clients: Dict[str, Mock]):
+    def test_get_manifest_etag(
+        self, processor: SweeperProcessor, mock_clients: Dict[str, Mock]
+    ):
         """Test _get_manifest_etag method."""
         mock_clients["s3"].head_object.return_value = {"ETag": "test-etag"}
 
         etag: str = processor._get_manifest_etag("test_key")
         assert etag == "test-etag"
 
-        mock_clients["s3"].head_object.assert_called_once_with(Bucket="test-bucket", Key="test_key")
+        mock_clients["s3"].head_object.assert_called_once_with(
+            Bucket="test-bucket", Key="test_key"
+        )
 
     def test_get_manifest_etag_botocore_error(
         self, processor: SweeperProcessor, mock_clients: Dict[str, Mock]
@@ -152,7 +160,9 @@ class TestSweeperProcessor:
 
     def test_create_manifest_config(self, processor: SweeperProcessor):
         """Test _create_manifest_config method."""
-        config: Dict[str, Any] = processor._create_manifest_config("test_key", "test-etag")
+        config: Dict[str, Any] = processor._create_manifest_config(
+            "test_key", "test-etag"
+        )
 
         assert config == {
             "Spec": {
@@ -177,14 +187,18 @@ class TestSweeperProcessor:
             }
         }
 
-    def test_submit_tagging_batch_job_error(self, processor, mock_clients):
+    def test_submit_tagging_batch_job_error(
+        self, processor: SweeperProcessor, mock_clients: Dict[str, Mock]
+    ):
         """Test _submit_tagging_batch_job when job creation fails."""
         mock_clients["s3_control"].create_job.side_effect = Exception("Mocked error")
 
         with pytest.raises(SweeperProcessorError):
-            processor._submit_tagging_batch_job(False, {}, {}, {}, 10)
+            processor._submit_tagging_batch_job({}, {})
 
-    def test_create_batch_tag_s3_job(self, processor, mock_clients):
+    def test_create_batch_tag_s3_job(
+        self, processor: SweeperProcessor, mock_clients: Dict[str, Mock]
+    ):
         """Test creating S3 batch tagging job"""
         # Test data
         s3_manifest_key: str = "test/test.csv"
