@@ -7,7 +7,7 @@ import csv
 from typing import Dict, List, Any
 from pathlib import Path
 from unittest.mock import Mock
-from deadline.job_attachments.bucket_sweeper.sweeper_processor import JobAttachmentsSweeper
+from deadline.job_attachments.bucket_sweeper.job_attachments_sweeper import JobAttachmentsSweeper
 from deadline.job_attachments.exceptions import (
     JobAttachmentsSweeperError,
     JobAttachmentS3BotoCoreError,
