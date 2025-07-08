@@ -8,6 +8,7 @@ from deadline.client.api._list_active_job_ids import _list_active_job_ids
 from deadline.client.exceptions import DeadlineOperationError
 from deadline.client.api._list_jobs_by_filter_expression import JobFetchFailure
 
+
 @pytest.fixture
 def mock_boto3_session():
     """Mock for Deadline Client"""
@@ -23,7 +24,7 @@ class TestListActiveJobIds():
             boto3_session=mock_boto3_session,
             farm_id="farm-id",
             queue_ids=[],
-            retention_datetime=datetime.now(timezone.utc)
+            retention_datetime=datetime.now(timezone.utc),
         )
         assert result == {}
 
@@ -38,7 +39,7 @@ class TestListActiveJobIds():
             boto3_session=mock_boto3_session,
             farm_id="farm-id",
             queue_ids=["queue-1"],
-            retention_datetime=datetime.now(timezone.utc)
+            retention_datetime=datetime.now(timezone.utc),
         )
         assert result == {"queue-1": []}
 
@@ -54,7 +55,7 @@ class TestListActiveJobIds():
                 boto3_session=mock_boto3_session,
                 farm_id="farm-id",
                 queue_ids=["queue-1"],
-                retention_datetime=datetime.now(timezone.utc)
+                retention_datetime=datetime.now(timezone.utc),
             )
 
     @patch("deadline.client.api._list_active_job_ids._list_jobs_by_filter_expression")
@@ -70,7 +71,7 @@ class TestListActiveJobIds():
                 boto3_session=mock_boto3_session,
                 farm_id="farm-id",
                 queue_ids=["queue-1"],
-                retention_datetime=datetime.now(timezone.utc)
+                retention_datetime=datetime.now(timezone.utc),
             )
 
     @patch("deadline.client.api._list_active_job_ids._list_jobs_by_filter_expression")
@@ -86,7 +87,7 @@ class TestListActiveJobIds():
             boto3_session=mock_boto3_session,
             farm_id="farm-id",
             queue_ids=queue_ids,
-            retention_datetime=retention_datetime
+            retention_datetime=retention_datetime,
         )
 
         expected_result: Dict[str, List[str]] = {
