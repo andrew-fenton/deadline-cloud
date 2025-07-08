@@ -118,7 +118,7 @@ class JobAttachmentsSweeper:
         Retrieves the ETag for the manifest file from S3.
 
         Raises:
-            ValueError: when head_object operation succeeds but etag is None
+            JobAttachmentsSweeperError: when head_object operation succeeds but etag is None
             JobAttachmentS3BotoCoreError: When S3 head_object operation fails
         """
         try:
@@ -128,7 +128,7 @@ class JobAttachmentsSweeper:
 
             etag: str = manifest_metadata.get("ETag", "")
             if not etag:
-                raise ValueError("Missing required Etag in manifest metadata")
+                raise JobAttachmentsSweeperError(message="Missing etag in manifest metadata")
 
             return etag
         except BotoCoreError as e:

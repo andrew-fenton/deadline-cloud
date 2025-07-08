@@ -141,7 +141,7 @@ class TestJobAttachmentsSweeper:
         """Test _get_manifest_etag method."""
         mock_s3.head_object.return_value = {"ETag": None}
 
-        with pytest.raises(ValueError):
+        with pytest.raises(JobAttachmentsSweeperError):
             processor._get_manifest_etag("test_key")
 
     def test_get_manifest_etag(
