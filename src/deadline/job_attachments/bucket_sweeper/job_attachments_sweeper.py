@@ -102,7 +102,7 @@ class JobAttachmentsSweeper:
 
         Raises:
             JobAttachmentS3BotoCoreError: When retrieving manifest metadata fails
-            JobAttachmentsSweeperError: When creating the batch job fails
+            JobAttachmentsSweeperError: When getting the manifest etag or creating the batch job fails
         """
         manifest_etag: str = self._get_manifest_etag(s3_manifest_key)
         manifest: Dict[str, Any] = self._create_manifest_config(s3_manifest_key, manifest_etag)
