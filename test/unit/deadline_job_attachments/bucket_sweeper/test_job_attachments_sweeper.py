@@ -33,7 +33,7 @@ def mock_deadline() -> Mock:
 
 
 @pytest.fixture
-def processor(mock_s3, mock_s3_control, mock_deadline) -> JobAttachmentsSweeper:
+def processor(mock_s3: Mock, mock_s3_control: Mock, mock_deadline: Mock) -> JobAttachmentsSweeper:
     """Fixture to create JobAttachmentsSweeper instance with mock clients"""
     return JobAttachmentsSweeper(
         s3_client=mock_s3,
