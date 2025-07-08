@@ -1,20 +1,12 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 
-import os
 import csv
-import boto3
 
-from datetime import datetime
 from typing import List, Dict, Any
 from botocore.exceptions import BotoCoreError
 from botocore.client import BaseClient
 
 from ..exceptions import JobAttachmentsSweeperError, JobAttachmentS3BotoCoreError
-from deadline.client.exceptions import DeadlineOperationError
-from deadline.client.api._list_jobs_by_filter_expression import (
-    JobFetchFailure,
-    _list_jobs_by_filter_expression,
-)
 
 
 class JobAttachmentsSweeper:
@@ -22,7 +14,6 @@ class JobAttachmentsSweeper:
 
     def __init__(
         self,
-        boto3_session: boto3.Session,
         s3_client: BaseClient,
         s3_control_client: BaseClient,
         deadline_client: BaseClient,
@@ -35,7 +26,6 @@ class JobAttachmentsSweeper:
         Initializes the JobAttachmentsSweeper.
 
         Args:
-            boto3_session: AWS boto3 session
             s3_client: AWS S3 client for basic S3 operations
             s3_control_client: AWS S3 Control client for batch operations
             deadline_client: Client for interacting with Deadline
@@ -48,7 +38,6 @@ class JobAttachmentsSweeper:
                     - s3:CreateJob
             bucket_name (str): target S3 bucket to cleanup
         """
-        self.boto3_session = boto3_session
         self.s3 = s3_client
         self.s3_control = s3_control_client
         self.deadline = deadline_client
@@ -56,56 +45,6 @@ class JobAttachmentsSweeper:
         self.account_id = account_id
         self.role_arn = role_arn
         self.bucket_name = bucket_name
-
-    def _get_active_job_ids(
-        self, queue_ids: List[str], retention_datetime: datetime
-    ) -> Dict[str, List[str]]:
-        """Retrieves active job IDs for specified queues that are newer than the retention date.
-
-        Args:
-            queue_ids: List of queue identifiers to check for active jobs
-            retention_datetime: Datetime threshold for considering jobs as active
-
-        Returns:
-            Dict[str, List[str]]: Mapping of queue IDs to lists of active job IDs
-                Key: Queue ID
-                Value: List of job IDs that are active in that queue
-
-        Raises:
-            JobAttachmentsSweeperError: If there is a failure fetching job IDs from Deadline, wrapping
-                either DeadlineOperationError or JobFetchFailure
-        """
-        queue_job_id_map: Dict[str, List[str]] = {}
-        filter_expression: Dict[str, Any] = {
-            "filters": [
-                {
-                    "dateTimeFilter": {
-                        "name": "endedAt",
-                        "dateTime": retention_datetime,
-                        "operator": "GREATER_THAN_EQUAL_TO",
-                    }
-                },
-            ],
-            "operator": "AND",
-        }
-
-        for queue_id in queue_ids:
-            try:
-                jobs: List[Dict[str, Any]] = _list_jobs_by_filter_expression(
-                    boto3_session=self.boto3_session,
-                    farm_id=self.farm_id,
-                    queue_id=queue_id,
-                    filter_expression=filter_expression
-                )
-            except (DeadlineOperationError, JobFetchFailure) as err:
-                raise JobAttachmentsSweeperError(
-                    f"Failed to fetch active job ids for {queue_id}: {str(err)}"
-                ) from err
-
-            extracted_job_ids: List[str] = [job["jobId"] for job in jobs]
-            queue_job_id_map[queue_id] = extracted_job_ids
-
-        return queue_job_id_map
 
     def _create_tag_manifest(self, file_path: str, delete_list: List[str]) -> None:
         """
