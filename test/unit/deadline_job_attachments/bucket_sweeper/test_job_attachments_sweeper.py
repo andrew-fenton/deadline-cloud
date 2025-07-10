@@ -19,18 +19,21 @@ def mock_s3() -> Mock:
     """Fixture to create mock AWS S3 client"""
     return Mock()
 
+
 @pytest.fixture
 def mock_s3_control() -> Mock:
     """Fixture to create mock AWS S3 Control client"""
     return Mock()
+
 
 @pytest.fixture
 def mock_deadline() -> Mock:
     """Fixture to create mock Deadline client"""
     return Mock()
 
+
 @pytest.fixture
-def processor(mock_s3, mock_s3_control, mock_deadline) -> JobAttachmentsSweeper:
+def processor(mock_s3: Mock, mock_s3_control: Mock, mock_deadline: Mock) -> JobAttachmentsSweeper:
     """Fixture to create JobAttachmentsSweeper instance with mock clients"""
     return JobAttachmentsSweeper(
         s3_client=mock_s3,
@@ -53,9 +56,7 @@ def test_dir(tmp_path: Path) -> Path:
 
 
 class TestJobAttachmentsSweeper:
-    def test_create_tag_manifest_empty_list(
-        self, processor: JobAttachmentsSweeper, test_dir: Path
-    ):
+    def test_create_tag_manifest_empty_list(self, processor: JobAttachmentsSweeper, test_dir: Path):
         """Test creating a tag manifest with an empty delete list."""
         test_file_path = test_dir / "empty_manifest.csv"
         manifest_path: str = processor._create_tag_manifest(str(test_file_path), [])
@@ -80,7 +81,6 @@ class TestJobAttachmentsSweeper:
             processor._create_tag_manifest(str(test_dir), ["object_key"])
 
             assert str(raised_error) == "Mocked IO Error"
-
 
     def test_create_tag_manifest(self, processor: JobAttachmentsSweeper, test_dir: Path):
         """Create a tag manifest and validate CSV content."""
@@ -110,9 +110,7 @@ class TestJobAttachmentsSweeper:
         ])
         # fmt: on
 
-    def test_upload_tag_manifest(
-        self, processor: JobAttachmentsSweeper, mock_s3: Mock
-    ):
+    def test_upload_tag_manifest(self, processor: JobAttachmentsSweeper, mock_s3: Mock):
         """Test uploading an existing CSV file to S3."""
 
         manifest_path: str = "test/tag_manifest.csv"
@@ -126,36 +124,28 @@ class TestJobAttachmentsSweeper:
             object_key,
         )
 
-    def test_upload_tag_manifest_s3_error(
-        self, processor: JobAttachmentsSweeper, mock_s3: Mock
-    ):
+    def test_upload_tag_manifest_s3_error(self, processor: JobAttachmentsSweeper, mock_s3: Mock):
         """Test uploading manifest when s3 upload fails."""
         mock_s3.upload_file.side_effect = BotoCoreError()
 
         with pytest.raises(JobAttachmentS3BotoCoreError):
             processor._upload_tag_manifest("test.csv", "test_key")
 
-    def test_get_manifest_etag_value_error(
-        self, processor: JobAttachmentsSweeper, mock_s3: Mock
-    ):
+    def test_get_manifest_etag_value_error(self, processor: JobAttachmentsSweeper, mock_s3: Mock):
         """Test _get_manifest_etag method."""
         mock_s3.head_object.return_value = {"ETag": None}
 
         with pytest.raises(JobAttachmentsSweeperError):
             processor._get_manifest_etag("test_key")
 
-    def test_get_manifest_etag(
-        self, processor: JobAttachmentsSweeper, mock_s3: Mock
-    ):
+    def test_get_manifest_etag(self, processor: JobAttachmentsSweeper, mock_s3: Mock):
         """Test _get_manifest_etag method."""
         mock_s3.head_object.return_value = {"ETag": "test-etag"}
 
         etag: str = processor._get_manifest_etag("test_key")
         assert etag == "test-etag"
 
-        mock_s3.head_object.assert_called_once_with(
-            Bucket="test-bucket", Key="test_key"
-        )
+        mock_s3.head_object.assert_called_once_with(Bucket="test-bucket", Key="test_key")
 
     def test_get_manifest_etag_botocore_error(
         self, processor: JobAttachmentsSweeper, mock_s3: Mock

@@ -1,6 +1,5 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 
-import os
 import csv
 
 from typing import List, Dict, Any
