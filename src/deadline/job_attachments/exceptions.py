@@ -183,3 +183,19 @@ class VFSRunPathNotSetError(JobAttachmentsError):
     """
     Exception for when the run path hasn't been set for the vfs
     """
+
+
+class BucketSweeperError(Exception):
+    """
+    Exception for bucket sweeper operations.
+    """
+
+    def __init__(self, message):
+        self.message = message
+        super().__init__(message)
+
+
+class JobAttachmentsSweeperError(BucketSweeperError):
+    """
+    Exception for manifest processing in bucket sweeper.
+    """
