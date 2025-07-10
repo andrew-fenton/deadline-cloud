@@ -45,6 +45,7 @@ def _list_active_job_ids(
     }
 
     for queue_id in queue_ids:
+        # TODO: Change _list_jobs_by_filter_expression to take List of queue_ids as param
         jobs: List[Dict[str, Any]] = _list_jobs_by_filter_expression(
             boto3_session=boto3_session,
             farm_id=farm_id,
