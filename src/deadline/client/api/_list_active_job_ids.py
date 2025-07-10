@@ -32,7 +32,7 @@ def _list_active_job_ids(
         "filters": [
             {
                 "dateTimeFilter": {
-                    "name": "endedAt",
+                    "name": "DELETED_AT",  # adding support for DELETED_AT in SearchJobs is in progress
                     "dateTime": retention_datetime,
                     "operator": "GREATER_THAN_EQUAL_TO",
                 }
