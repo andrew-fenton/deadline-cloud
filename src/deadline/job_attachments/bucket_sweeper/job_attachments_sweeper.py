@@ -105,8 +105,23 @@ class JobAttachmentsSweeper:
             JobAttachmentsSweeperError: When getting the manifest etag or creating the batch job fails
         """
         manifest_etag: str = self._get_manifest_etag(s3_manifest_key)
-        manifest: Dict[str, Any] = self._create_manifest_config(s3_manifest_key, manifest_etag)
-        operation: Dict[str, Any] = self._create_delete_tagging_operation()
+        manifest: Dict[str, Any] = {
+            "Spec": {
+                "Format": "S3BatchOperations_CSV_20180820",
+                "Fields": ["Bucket", "Key"],
+            },
+            "Location": {
+                "ObjectArn": f"arn:aws:s3:::{self.bucket_name}/{s3_manifest_key}",
+                "ETag": f"{manifest_etag}",
+            },
+        }
+        operation: Dict[str, Any] = {
+            "S3PutObjectTagging": {
+                "TagSet": [
+                    {"Key": "delete", "Value": "True"},
+                ]
+            }
+        }
 
         self._submit_tagging_batch_job(
             operation=operation,
@@ -133,29 +148,6 @@ class JobAttachmentsSweeper:
             return etag
         except BotoCoreError as e:
             raise JobAttachmentS3BotoCoreError(action="querying head object", error_details=str(e))
-
-    def _create_manifest_config(self, s3_manifest_key: str, manifest_etag: str) -> Dict[str, Any]:
-        """Creates the manifest configuration for the batch job."""
-        return {
-            "Spec": {
-                "Format": "S3BatchOperations_CSV_20180820",
-                "Fields": ["Bucket", "Key"],
-            },
-            "Location": {
-                "ObjectArn": f"arn:aws:s3:::{self.bucket_name}/{s3_manifest_key}",
-                "ETag": f"{manifest_etag}",
-            },
-        }
-
-    def _create_delete_tagging_operation(self) -> Dict[str, Any]:
-        """Creates the tagging operation configuration."""
-        return {
-            "S3PutObjectTagging": {
-                "TagSet": [
-                    {"Key": "delete", "Value": "True"},
-                ]
-            }
-        }
 
     def _submit_tagging_batch_job(
         self,

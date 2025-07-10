@@ -166,35 +166,6 @@ class TestJobAttachmentsSweeper:
         with pytest.raises(JobAttachmentS3BotoCoreError):
             processor._get_manifest_etag("test_key")
 
-    def test_create_manifest_config(self, processor: JobAttachmentsSweeper):
-        """Test _create_manifest_config method."""
-        config: Dict[str, Any] = processor._create_manifest_config(
-            "test_key", "test-etag"
-        )
-
-        assert config == {
-            "Spec": {
-                "Format": "S3BatchOperations_CSV_20180820",
-                "Fields": ["Bucket", "Key"],
-            },
-            "Location": {
-                "ObjectArn": "arn:aws:s3:::test-bucket/test_key",
-                "ETag": "test-etag",
-            },
-        }
-
-    def test_create_delete_tagging_operation(self, processor: JobAttachmentsSweeper):
-        """Test _create_delete_tagging_operation method."""
-        operation: Dict[str, Any] = processor._create_delete_tagging_operation()
-
-        assert operation == {
-            "S3PutObjectTagging": {
-                "TagSet": [
-                    {"Key": "delete", "Value": "True"},
-                ]
-            }
-        }
-
     def test_submit_tagging_batch_job_error(
         self, processor: JobAttachmentsSweeper, mock_s3_control: Mock
     ):
