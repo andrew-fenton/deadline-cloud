@@ -2558,8 +2558,8 @@ def test_get_input_manifest_keys():
     mock_deadline.get_job.return_value = {
         "attachments": {
             "manifests": [
-                {"inputManifestPath": "farm-id/queue-id/Inputs/hash/manifest_input"},
-                {"inputManifestPath": "farm-id/queue-id/Inputs/hash/manifest_1_input"},
+                {"inputManifestPath": "farm-id/queue-id/Inputs/123/manifest_input"},
+                {"inputManifestPath": "farm-id/queue-id/Inputs/456/manifest_input"},
             ]
         }
     }
@@ -2574,8 +2574,8 @@ def test_get_input_manifest_keys():
         )
 
     expected: List[str] = [
-        "DeadlineCloud/Manifests/farm-id/queue-id/Inputs/hash/manifest_input",
-        "DeadlineCloud/Manifests/farm-id/queue-id/Inputs/hash/manifest_1_input",
+        "DeadlineCloud/Manifests/farm-id/queue-id/Inputs/123/manifest_input",
+        "DeadlineCloud/Manifests/farm-id/queue-id/Inputs/456/manifest_input",
     ]
     assert sorted(result) == sorted(expected)
 
@@ -2604,7 +2604,7 @@ def test_get_input_manifest_keys_trailing_slash_in_prefix():
     mock_deadline: MagicMock = MagicMock()
     mock_deadline.get_job.return_value = {
         "attachments": {
-            "manifests": [{"inputManifestPath": "farm-id/queue-id/Inputs/hash/manifest_input"}]
+            "manifests": [{"inputManifestPath": "farm-id/queue-id/Inputs/123/manifest_input"}]
         }
     }
 
@@ -2617,7 +2617,7 @@ def test_get_input_manifest_keys_trailing_slash_in_prefix():
             job_id="job-id",
         )
 
-    assert result == ["DeadlineCloud/Manifests/farm-id/queue-id/Inputs/hash/manifest_input"]
+    assert result == ["DeadlineCloud/Manifests/farm-id/queue-id/Inputs/123/manifest_input"]
 
 
 def test_get_input_manifest_keys_client_error():
@@ -2697,10 +2697,10 @@ def test_get_all_manifest_s3_keys_happy_path():
 
     with patch(
         "deadline.job_attachments.download._get_input_manifest_keys", return_value=input_keys
-    ) as mock_input, patch(
+    ), patch(
         "deadline.job_attachments.download._get_tasks_manifests_keys_from_s3",
         return_value=output_keys,
-    ) as mock_output:
+    ):
         result: List[str] = _get_all_manifest_s3_keys_for_job(
             session=mock_session,
             job_attachment_settings=job_settings,
@@ -2725,9 +2725,9 @@ def test_get_all_manifest_s3_keys_only_input_manifests():
 
     with patch(
         "deadline.job_attachments.download._get_input_manifest_keys", return_value=input_keys
-    ) as mock_input, patch(
+    ), patch(
         "deadline.job_attachments.download._get_tasks_manifests_keys_from_s3", return_value=[]
-    ) as mock_output:
+    ):
         result: List[str] = _get_all_manifest_s3_keys_for_job(
             session=mock_session,
             job_attachment_settings=job_settings,
@@ -2749,7 +2749,7 @@ def test_get_all_manifest_s3_keys_input_manifest_fails():
     with patch(
         "deadline.job_attachments.download._get_input_manifest_keys",
         side_effect=Exception("Failed to retrieve input manifests"),
-    ) as mock_input:
+    ):
         with pytest.raises(JobAttachmentsError) as error:
             _get_all_manifest_s3_keys_for_job(
                 session=mock_session,
@@ -2773,10 +2773,10 @@ def test_get_all_manifest_s3_keys_output_manifest_fails():
 
     with patch(
         "deadline.job_attachments.download._get_input_manifest_keys", return_value=[]
-    ) as mock_input, patch(
+    ), patch(
         "deadline.job_attachments.download._get_tasks_manifests_keys_from_s3",
         side_effect=Exception("Failed to retrieve output manifests"),
-    ) as mock_output:
+    ):
         with pytest.raises(JobAttachmentsError) as error:
             _get_all_manifest_s3_keys_for_job(
                 session=mock_session,
