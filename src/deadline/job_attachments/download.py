@@ -15,14 +15,17 @@ from itertools import chain
 from logging import Logger, LoggerAdapter, getLogger
 from pathlib import Path
 from tempfile import NamedTemporaryFile
-from typing import Any, Callable, DefaultDict, List, Optional, Tuple, Union
+from typing import Any, Callable, DefaultDict, List, Optional, Tuple, Union, Dict
 
 import boto3
 from boto3.s3.transfer import ProgressCallbackInvoker
 from botocore.client import BaseClient
 from botocore.exceptions import BotoCoreError, ClientError
 
-from .asset_manifests.base_manifest import BaseAssetManifest, BaseManifestPath as RelativeFilePath
+from .asset_manifests.base_manifest import (
+    BaseAssetManifest,
+    BaseManifestPath as RelativeFilePath,
+)
 from .asset_manifests.hash_algorithms import HashAlgorithm
 from .asset_manifests.decode import decode_manifest
 from .exceptions import (
@@ -57,6 +60,7 @@ from .progress_tracker import (
 )
 from ._aws.aws_clients import (
     get_account_id,
+    get_deadline_client,
     get_s3_client,
     get_s3_max_pool_connections,
     get_s3_transfer_manager,
@@ -195,7 +199,9 @@ def _get_output_manifest_prefix(
             farm_id, queue_id, job_id, step_id, task_id
         )
     elif step_id:
-        manifest_prefix = s3_settings.full_step_output_prefix(farm_id, queue_id, job_id, step_id)
+        manifest_prefix = s3_settings.full_step_output_prefix(
+            farm_id, queue_id, job_id, step_id
+        )
     else:
         manifest_prefix = s3_settings.full_job_output_prefix(farm_id, queue_id, job_id)
 
@@ -267,7 +273,9 @@ def _get_tasks_manifests_keys_from_s3(
         last_subfolder = sorted(
             set(f.split("/")[len(task_folder.split("/"))] for f in files), reverse=True
         )[0]
-        manifests_keys += [f for f in files if f.startswith(f"{task_folder}/{last_subfolder}/")]
+        manifests_keys += [
+            f for f in files if f.startswith(f"{task_folder}/{last_subfolder}/")
+        ]
 
     # Now `manifests_keys` is a list of the keys of files in the last folder (alphabetically) under each "task-" folder.
     return manifests_keys
@@ -452,12 +460,16 @@ def download_files_in_directory(
     )
 
     # Group by hash algorithm all the files that fall under the directory
-    files_to_download: DefaultDict[HashAlgorithm, list[RelativeFilePath]] = DefaultDict(list)
+    files_to_download: DefaultDict[HashAlgorithm, list[RelativeFilePath]] = DefaultDict(
+        list
+    )
     total_bytes = 0
     total_files = 0
     for path_group in all_grouped_paths.values():
         for hash_alg, path_list in path_group.files_by_hash_alg.items():
-            files_list = [file for file in path_list if file.path.startswith(directory_path + "/")]
+            files_list = [
+                file for file in path_list if file.path.startswith(directory_path + "/")
+            ]
             files_size = sum([file.size for file in files_list])
             total_bytes += files_size
             total_files += len(files_list)
@@ -505,7 +517,9 @@ def download_file(
     session: Optional[boto3.Session] = None,
     modified_time_override: Optional[float] = None,
     progress_tracker: Optional[ProgressTracker] = None,
-    file_conflict_resolution: Optional[FileConflictResolution] = FileConflictResolution.CREATE_COPY,
+    file_conflict_resolution: Optional[
+        FileConflictResolution
+    ] = FileConflictResolution.CREATE_COPY,
 ) -> Tuple[int, Optional[Path]]:
     """
     Downloads a file from the S3 bucket to the local directory. `modified_time_override` is ignored if the manifest
@@ -657,7 +671,9 @@ def _download_files_parallel(
     session: Optional[boto3.Session] = None,
     file_mod_time: Optional[float] = None,
     progress_tracker: Optional[ProgressTracker] = None,
-    file_conflict_resolution: Optional[FileConflictResolution] = FileConflictResolution.CREATE_COPY,
+    file_conflict_resolution: Optional[
+        FileConflictResolution
+    ] = FileConflictResolution.CREATE_COPY,
 ) -> list[str]:
     """
     Downloads files in parallel using thread pool.
@@ -667,7 +683,9 @@ def _download_files_parallel(
     collision_lock: Lock = Lock()
     collision_file_dict: DefaultDict[str, int] = DefaultDict(int)
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=num_download_workers) as executor:
+    with concurrent.futures.ThreadPoolExecutor(
+        max_workers=num_download_workers
+    ) as executor:
         futures = {
             executor.submit(
                 download_file,
@@ -713,7 +731,9 @@ def download_files(
     s3_settings: JobAttachmentS3Settings,
     session: Optional[boto3.Session] = None,
     progress_tracker: Optional[ProgressTracker] = None,
-    file_conflict_resolution: Optional[FileConflictResolution] = FileConflictResolution.CREATE_COPY,
+    file_conflict_resolution: Optional[
+        FileConflictResolution
+    ] = FileConflictResolution.CREATE_COPY,
 ) -> list[str]:
     """
     Downloads all files from the S3 bucket in the Job Attachment settings to the specified directory.
@@ -755,7 +775,14 @@ def get_job_output_paths_by_asset_root(
     Returns a dict of ManifestPathGroups, with the root path as the key.
     """
     output_manifests_by_root = get_output_manifests_by_asset_root(
-        s3_settings, farm_id, queue_id, job_id, step_id, task_id, session_action_id, session=session
+        s3_settings,
+        farm_id,
+        queue_id,
+        job_id,
+        step_id,
+        task_id,
+        session_action_id,
+        session=session,
     )
 
     outputs: dict[str, ManifestPathGroup] = {}
@@ -793,10 +820,15 @@ def get_output_manifests_by_asset_root(
     except JobAttachmentsError:
         return outputs
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=S3_DOWNLOAD_MAX_CONCURRENCY) as executor:
+    with concurrent.futures.ThreadPoolExecutor(
+        max_workers=S3_DOWNLOAD_MAX_CONCURRENCY
+    ) as executor:
         futures = [
             executor.submit(
-                get_asset_root_and_manifest_from_s3, key, s3_settings.s3BucketName, session
+                get_asset_root_and_manifest_from_s3,
+                key,
+                s3_settings.s3BucketName,
+                session,
             )
             for key in manifests_keys
         ]
@@ -917,10 +949,14 @@ def download_files_from_manifests(
                 fs_permission_settings=fs_permission_settings,
             )
 
-        downloaded_files_paths_by_root[local_download_dir].extend(downloaded_files_paths)
+        downloaded_files_paths_by_root[local_download_dir].extend(
+            downloaded_files_paths
+        )
 
     progress_tracker.total_time = time.perf_counter() - start_time
-    return progress_tracker.get_download_summary_statistics(downloaded_files_paths_by_root)
+    return progress_tracker.get_download_summary_statistics(
+        downloaded_files_paths_by_root
+    )
 
 
 def _get_num_download_workers() -> int:
@@ -929,7 +965,9 @@ def _get_num_download_workers() -> int:
     based on the allowed S3 max pool connections size. If the max worker count is calculated
     to be 0 due to a small pool connections size limit, it returns 1.
     """
-    num_download_workers = int(get_s3_max_pool_connections() / S3_DOWNLOAD_MAX_CONCURRENCY)
+    num_download_workers = int(
+        get_s3_max_pool_connections() / S3_DOWNLOAD_MAX_CONCURRENCY
+    )
     if num_download_workers <= 0:
         # This can result in triggering "Connection pool is full" warning messages during downloads.
         num_download_workers = 1
@@ -961,7 +999,9 @@ def _set_fs_group(
         )
     else:  # if os.name is not "posix"
         if not isinstance(fs_permission_settings, WindowsFileSystemPermissionSettings):
-            raise TypeError("The file system permission settings must be specific to Windows.")
+            raise TypeError(
+                "The file system permission settings must be specific to Windows."
+            )
         _set_fs_permission_for_windows(
             file_paths=file_paths,
             local_root=local_root,
@@ -969,7 +1009,9 @@ def _set_fs_group(
         )
 
 
-def merge_asset_manifests(manifests: list[BaseAssetManifest]) -> BaseAssetManifest | None:
+def merge_asset_manifests(
+    manifests: list[BaseAssetManifest],
+) -> BaseAssetManifest | None:
     """Merge files from multiple manifests into a single list, ensuring that each filename
     is unique by keeping the one from the last encountered manifest. (Thus, the steps'
     outputs are downloaded over the input job attachments.)
@@ -1051,7 +1093,11 @@ def _merge_asset_manifests_sorted_asc_by_last_modified(
 
 def _write_manifest_to_temp_file(manifest: BaseAssetManifest, dir: Path) -> str:
     with NamedTemporaryFile(
-        suffix=".json", prefix="deadline-merged-manifest-", delete=False, mode="w", dir=dir
+        suffix=".json",
+        prefix="deadline-merged-manifest-",
+        delete=False,
+        mode="w",
+        dir=dir,
     ) as file:
         file.write(manifest.encode())
         return file.name
@@ -1096,7 +1142,9 @@ def handle_existing_vfs(
         merged_input_manifest: Optional[BaseAssetManifest] = merge_asset_manifests(
             [input_manifest, manifest]
         )
-        manifest = merged_input_manifest if merged_input_manifest is not None else manifest
+        manifest = (
+            merged_input_manifest if merged_input_manifest is not None else manifest
+        )
     else:
         download_logger.error(f"input manifest not found for mount at {mount_point}")
         return manifest
@@ -1143,7 +1191,9 @@ def mount_vfs_from_manifests(
 
     asset_cache_hash_path.mkdir(parents=True, exist_ok=True)
 
-    _set_fs_group([str(asset_cache_hash_path)], str(vfs_cache_dir), fs_permission_settings)
+    _set_fs_group(
+        [str(asset_cache_hash_path)], str(vfs_cache_dir), fs_permission_settings
+    )
 
     manifest_dir: Path = session_dir / VFS_MANIFEST_FOLDER_IN_SESSION
     manifest_dir.mkdir(parents=True, exist_ok=True)
@@ -1172,7 +1222,9 @@ def mount_vfs_from_manifests(
         )
 
         # Write out a temporary file with the contents of the newly merged manifest
-        manifest_path: str = _write_manifest_to_temp_file(final_manifest, dir=manifest_dir)
+        manifest_path: str = _write_manifest_to_temp_file(
+            final_manifest, dir=manifest_dir
+        )
 
         vfs_manager: VFSProcessManager = VFSProcessManager(
             s3_bucket,
@@ -1188,7 +1240,9 @@ def mount_vfs_from_manifests(
         vfs_manager.start(session_dir=session_dir)
 
 
-def _ensure_paths_within_directory(root_path: str, paths_relative_to_root: list[str]) -> None:
+def _ensure_paths_within_directory(
+    root_path: str, paths_relative_to_root: list[str]
+) -> None:
     """
     Validates the given paths to ensure that they are within the given root path.
     If the root path is not an absolute path, raises a ValueError.
@@ -1274,18 +1328,24 @@ class OutputDownloader:
             # among the file paths of the new_root, then prefix the file path with the original_root path.
             # This is to avoid duplicate file paths in the new_root.
             paths_in_new_root = self.outputs_by_root[new_root].get_all_paths()
-            for manifest_paths in self.outputs_by_root[original_root].files_by_hash_alg.values():
+            for manifest_paths in self.outputs_by_root[
+                original_root
+            ].files_by_hash_alg.values():
                 for manifest_path in manifest_paths:
                     if manifest_path.path in paths_in_new_root:
                         new_name_prefix = (
-                            original_root.replace("/", "_").replace("\\", "_").replace(":", "_")
+                            original_root.replace("/", "_")
+                            .replace("\\", "_")
+                            .replace(":", "_")
                         )
                         manifest_path.path = str(
                             Path(manifest_path.path).with_name(
                                 f"{new_name_prefix}_{manifest_path.path}"
                             )
                         )
-            self.outputs_by_root[new_root].combine_with_group(self.outputs_by_root[original_root])
+            self.outputs_by_root[new_root].combine_with_group(
+                self.outputs_by_root[original_root]
+            )
             del self.outputs_by_root[original_root]
         else:
             self.outputs_by_root = {
@@ -1332,7 +1392,9 @@ class OutputDownloader:
             for root, output_path_group in self.outputs_by_root.items():
                 for hash_alg, path_list in output_path_group.files_by_hash_alg.items():
                     # Validate the file paths to see if they are under the given download directory.
-                    _ensure_paths_within_directory(root, [file.path for file in path_list])
+                    _ensure_paths_within_directory(
+                        root, [file.path for file in path_list]
+                    )
 
                     downloaded_files_paths = download_files(
                         files=path_list,
@@ -1353,4 +1415,142 @@ class OutputDownloader:
 
         progress_tracker.total_time = time.perf_counter() - start_time
 
-        return progress_tracker.get_download_summary_statistics(downloaded_files_paths_by_root)
+        return progress_tracker.get_download_summary_statistics(
+            downloaded_files_paths_by_root
+        )
+
+
+def _download_job_manifests_using_s3_keys(
+    session: boto3.Session,
+    manifest_keys: List[str],
+    job_attachment_settings: JobAttachmentS3Settings,
+    download_directory: str,
+) -> None:
+    """
+    Downloads job manifests from S3 to a local directory using provided S3 keys.
+
+    Note: Current implementation downloads sequentially. Future optimization 
+    opportunity exists for parallel downloads.
+
+    Args:
+        session: boto3 Session
+        manifest_keys: List of S3 object keys for manifest files
+        job_attachment_settings: S3 job attachments settings
+        download_directory: Local directory path where manifests will be saved
+
+    Raises:
+        JobAttachmentsError: If manifest keys are malformed or if there are IO errors
+        JobAttachmentS3BotoCoreError: If there are AWS S3 errors (excluding missing files)
+    """
+    s3 = get_s3_client(session=session)
+
+    for manifest_key in manifest_keys:
+        split_key = manifest_key.split("/")
+
+        if len(split_key) < 2:
+            raise JobAttachmentsError(f"Invalid manifest key structure: {manifest_key}. Expected at least 2 path segments.")
+
+        file_name = f"{split_key[-2]}_{split_key[-1]}"
+        local_file_path = os.path.join(download_directory, file_name)
+        
+        try:
+            s3.download_file(job_attachment_settings.s3BucketName, manifest_key, local_file_path)
+        except ClientError as err:
+            if err.response["Error"]["Code"] == "NoSuchKey":
+                # Skip missing files - they may have been deleted manually
+                continue
+            raise JobAttachmentS3BotoCoreError(f"Failed to download manifest {manifest_key}: {err}") from err
+        except IOError as err:
+            raise JobAttachmentsError(f"Failed to download manifest {manifest_key}: {err}") from err
+
+
+def _get_all_manifest_s3_keys_for_job(
+    session: boto3.Session,
+    job_attachment_settings: JobAttachmentS3Settings,
+    farm_id: str,
+    queue_id: str,
+    job_id: str,
+) -> List[str]:
+    """
+    Retrieves all manifest (both input and output) S3 keys for a specific job.
+
+    Args:
+        session: boto3 Session for AWS credentials
+        job_attachment_settings: S3 job attachments settings
+        farm_id: Deadline farm identifier
+        queue_id: Deadline queue identifier
+        job_id: Deadline job identifier
+
+    Returns:
+        List[str]: Combined list of input and output manifest S3 keys
+
+    Raises:
+        JobAttachmentsError: If there's any error retrieving the manifests
+    """
+    root_prefix = job_attachment_settings.rootPrefix.rstrip("/")
+    output_manifest_prefix = (
+        f"{root_prefix}/Manifests/{farm_id}/{queue_id}/{job_id}/"
+    )
+
+    try:
+        input_manifest_keys: List[str] = _get_input_manifest_keys(
+            session=session,
+            s3_root_prefix=job_attachment_settings.rootPrefix,
+            farm_id=farm_id,
+            queue_id=queue_id,
+            job_id=job_id,
+        )
+        output_manifest_keys: List[str] = _get_tasks_manifests_keys_from_s3(
+            manifest_prefix=output_manifest_prefix,
+            s3_bucket=job_attachment_settings.s3BucketName,
+            session=session,
+        )
+    except Exception as err:
+        raise JobAttachmentsError(f"Failed to get all job manifest keys: {str(err)}") from err
+
+    return input_manifest_keys + output_manifest_keys
+
+
+def _get_input_manifest_keys(
+    session: boto3.Session,
+    s3_root_prefix: str,
+    farm_id: str,
+    queue_id: str,
+    job_id: str,
+) -> List[str]:
+    """
+    Retrieves S3 keys for input manifests associated with a specific Deadline job.
+
+    Args:
+        session: boto3 Session
+        s3_root_prefix: Base S3 path prefix user for job attachments
+        farm_id: Deadline farm identifier
+        queue_id: Deadline queue identifier
+        job_id: Deadline job identifier
+
+    Returns:
+        List[str]: Full S3 object keys for the input manifests
+
+    Raises:
+        JobAttachmentsError: If job metadata can't be retrieved or doesn't contain expected structure
+    """
+    cleaned_root_prefix: str = s3_root_prefix.rstrip("/")
+    deadline: BaseClient = get_deadline_client(session=session)
+
+    try:
+        job_metadata: Dict[str, Any] = deadline.get_job(farmId=farm_id, queueId=queue_id, jobId=job_id)
+    except ClientError as err:
+        raise JobAttachmentsError(f"Failed to get job metadata: {str(err)}")
+    
+    if "attachments" not in job_metadata or "manifests" not in job_metadata["attachments"]:
+        raise JobAttachmentsError("Job metadata missing expected attachments or manifests structure")
+
+    manifest_data: Dict[str, Any] = job_metadata["attachments"]["manifests"]
+
+    manifest_keys: List[str] = []
+    for manifest in manifest_data:
+        manifest_path: str = manifest["inputManifestPath"]
+        full_s3_path: str = f"{cleaned_root_prefix}/Manifests/{manifest_path}"
+        manifest_keys.append(full_s3_path)
+
+    return manifest_keys
