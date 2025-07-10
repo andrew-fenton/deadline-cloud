@@ -13,7 +13,10 @@ def _list_active_job_ids(
     """Retrieves active job IDs for specified queues that are newer than the retention date.
 
     Args:
-        boto3_session: AWS boto3 session
+        boto3_session: AWS boto3 session with credentials that have permissions to access multiple queues.
+            Must be a general session (from get_boto3_session()) and not a queue-specific session
+            (from get_queue_user_boto3_session()), as queue-specific sessions can only access
+            their designated queue.
         farm_id: Deadline farm identifier
         queue_ids: List of queue identifiers to check for active jobs
         retention_datetime: Datetime threshold for considering jobs as active
