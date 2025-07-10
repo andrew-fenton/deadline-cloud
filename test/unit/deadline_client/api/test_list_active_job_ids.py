@@ -15,8 +15,7 @@ def mock_boto3_session():
     return Mock()
 
 
-class TestListActiveJobIds():
-
+class TestListActiveJobIds:
     @patch("deadline.client.api._list_active_job_ids._list_jobs_by_filter_expression")
     def test_get_active_job_ids_empty_queue_list(self, mock_boto3_session: Mock):
         """Test behavior with empty queue list."""
@@ -59,9 +58,7 @@ class TestListActiveJobIds():
             )
 
     @patch("deadline.client.api._list_active_job_ids._list_jobs_by_filter_expression")
-    def test_get_active_job_ids_job_fetch_failure_error(
-        self, mock_list_jobs: Mock
-    ):
+    def test_get_active_job_ids_job_fetch_failure_error(self, mock_list_jobs: Mock):
         """Test get active job ids when listing function fails."""
 
         mock_list_jobs.side_effect = JobFetchFailure()
