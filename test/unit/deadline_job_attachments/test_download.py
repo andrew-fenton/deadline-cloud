@@ -54,7 +54,7 @@ from deadline.job_attachments.download import (
     VFS_MANIFEST_FOLDER_IN_SESSION,
     VFS_MANIFEST_FOLDER_PERMISSIONS,
     VFS_LOGS_FOLDER_IN_SESSION,
-    _get_input_manifest_keys,
+    _get_input_manifest_keys_for_job,
     _get_all_manifest_s3_keys_for_job,
     _download_job_manifests_using_s3_keys,
 )
@@ -2551,7 +2551,7 @@ def test_get_new_copy_file_path_file_collisions(tmp_path: Path) -> None:
     assert test_dict[str(tmp_path / "test_overlapping_path_but_original (1).txt")] == 1
 
 
-def test_get_input_manifest_keys_happy_path():
+def test_get_input_manifest_keys_for_job_happy_path():
     """Test successful retrieval of manifest keys"""
     mock_session: MagicMock = MagicMock()
     mock_deadline: MagicMock = MagicMock()
@@ -2565,7 +2565,7 @@ def test_get_input_manifest_keys_happy_path():
     }
 
     with patch("deadline.job_attachments.download.get_deadline_client", return_value=mock_deadline):
-        result: List[str] = _get_input_manifest_keys(
+        result: List[str] = _get_input_manifest_keys_for_job(
             session=mock_session,
             s3_root_prefix="DeadlineCloud/",
             farm_id="farm-id",
@@ -2580,7 +2580,7 @@ def test_get_input_manifest_keys_happy_path():
     assert sorted(result) == sorted(expected)
 
 
-def test_get_input_manifest_keys_trailing_slash_in_prefix():
+def test_get_input_manifest_keys_for_job_trailing_slash_in_prefix():
     """Test handling of trailing slash in s3_root_prefix"""
     mock_session: MagicMock = MagicMock()
     mock_deadline: MagicMock = MagicMock()
@@ -2591,7 +2591,7 @@ def test_get_input_manifest_keys_trailing_slash_in_prefix():
     }
 
     with patch("deadline.job_attachments.download.get_deadline_client", return_value=mock_deadline):
-        result: List[str] = _get_input_manifest_keys(
+        result: List[str] = _get_input_manifest_keys_for_job(
             session=mock_session,
             s3_root_prefix="DeadlineCloud/",  # Note trailing slash
             farm_id="farm-id",
@@ -2602,7 +2602,7 @@ def test_get_input_manifest_keys_trailing_slash_in_prefix():
     assert result == ["DeadlineCloud/Manifests/farm-id/queue-id/Inputs/123/manifest_input"]
 
 
-def test_get_input_manifest_keys_client_error():
+def test_get_input_manifest_keys_for_job_client_error():
     """Test handling of ClientError from Deadline client"""
     mock_session: MagicMock = MagicMock()
     mock_deadline: MagicMock = MagicMock()
@@ -2612,7 +2612,7 @@ def test_get_input_manifest_keys_client_error():
 
     with patch("deadline.job_attachments.download.get_deadline_client", return_value=mock_deadline):
         with pytest.raises(JobAttachmentsError) as error:
-            _get_input_manifest_keys(
+            _get_input_manifest_keys_for_job(
                 session=mock_session,
                 s3_root_prefix="DeadlineCloud",
                 farm_id="farm-id",
@@ -2623,14 +2623,14 @@ def test_get_input_manifest_keys_client_error():
     assert "Failed to get job metadata" in str(error.value)
 
 
-def test_get_input_manifest_keys_missing_attachments():
+def test_get_input_manifest_keys_for_job_missing_attachments():
     """Test when job metadata is missing attachments key"""
     mock_session = MagicMock()
     mock_deadline = MagicMock()
     mock_deadline.get_job.return_value = {}
 
     with patch("deadline.job_attachments.download.get_deadline_client", return_value=mock_deadline):
-        result: List[str] = _get_input_manifest_keys(
+        result: List[str] = _get_input_manifest_keys_for_job(
             session=mock_session,
             s3_root_prefix="DeadlineCloud/",
             farm_id="farm-id",
@@ -2641,14 +2641,14 @@ def test_get_input_manifest_keys_missing_attachments():
     assert result == []
 
 
-def test_get_input_manifest_keys_missing_manifests():
+def test_get_input_manifest_keys_for_job_missing_manifests():
     """Test when attachments is missing manifests key"""
     mock_session = MagicMock()
     mock_deadline = MagicMock()
     mock_deadline.get_job.return_value = {"attachments": {}}
 
     with patch("deadline.job_attachments.download.get_deadline_client", return_value=mock_deadline):
-        result: List[str] = _get_input_manifest_keys(
+        result: List[str] = _get_input_manifest_keys_for_job(
             session=mock_session,
             s3_root_prefix="DeadlineCloud/",
             farm_id="farm-id",
@@ -2658,7 +2658,7 @@ def test_get_input_manifest_keys_missing_manifests():
 
     assert result == []
 
-def test_get_input_manifest_keys_missing_input_manifest_path():
+def test_get_input_manifest_keys_for_job_missing_input_manifest_path():
     """Test when a manifest is missing inputManifestPath key"""
     mock_session = MagicMock()
     mock_deadline = MagicMock()
@@ -2672,7 +2672,7 @@ def test_get_input_manifest_keys_missing_input_manifest_path():
     }
 
     with patch("deadline.job_attachments.download.get_deadline_client", return_value=mock_deadline):
-        result: List[str] = _get_input_manifest_keys(
+        result: List[str] = _get_input_manifest_keys_for_job(
             session=mock_session,
             s3_root_prefix="DeadlineCloud/",
             farm_id="farm-id",
@@ -2699,7 +2699,7 @@ def test_get_all_manifest_s3_keys_happy_path():
     ]
 
     with patch(
-        "deadline.job_attachments.download._get_input_manifest_keys", return_value=input_keys
+        "deadline.job_attachments.download._get_input_manifest_keys_for_job", return_value=input_keys
     ), patch(
         "deadline.job_attachments.download._get_tasks_manifests_keys_from_s3",
         return_value=output_keys,
@@ -2727,7 +2727,7 @@ def test_get_all_manifest_s3_keys_only_input_manifests():
     ]
 
     with patch(
-        "deadline.job_attachments.download._get_input_manifest_keys", return_value=input_keys
+        "deadline.job_attachments.download._get_input_manifest_keys_for_job", return_value=input_keys
     ), patch(
         "deadline.job_attachments.download._get_tasks_manifests_keys_from_s3", return_value=[]
     ):
@@ -2750,7 +2750,7 @@ def test_get_all_manifest_s3_keys_input_manifest_fails():
     )
 
     with patch(
-        "deadline.job_attachments.download._get_input_manifest_keys",
+        "deadline.job_attachments.download._get_input_manifest_keys_for_job",
         side_effect=Exception("Failed to retrieve input manifests"),
     ):
         with pytest.raises(JobAttachmentsError) as error:
@@ -2775,7 +2775,7 @@ def test_get_all_manifest_s3_keys_output_manifest_fails():
     )
 
     with patch(
-        "deadline.job_attachments.download._get_input_manifest_keys", return_value=[]
+        "deadline.job_attachments.download._get_input_manifest_keys_for_job", return_value=[]
     ), patch(
         "deadline.job_attachments.download._get_tasks_manifests_keys_from_s3",
         side_effect=Exception("Failed to retrieve output manifests"),

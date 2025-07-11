@@ -1444,7 +1444,7 @@ def _get_all_manifest_s3_keys_for_job(
     output_manifest_prefix: str = f"{root_prefix}/Manifests/{farm_id}/{queue_id}/{job_id}/"
 
     try:
-        input_manifest_keys: List[str] = _get_input_manifest_keys(
+        input_manifest_keys: List[str] = _get_input_manifest_keys_for_job(
             session=session,
             s3_root_prefix=job_attachment_settings.rootPrefix,
             farm_id=farm_id,
@@ -1462,7 +1462,7 @@ def _get_all_manifest_s3_keys_for_job(
     return input_manifest_keys + output_manifest_keys
 
 
-def _get_input_manifest_keys(
+def _get_input_manifest_keys_for_job(
     session: boto3.Session,
     s3_root_prefix: str,
     farm_id: str,
