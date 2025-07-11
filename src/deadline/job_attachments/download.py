@@ -1495,15 +1495,18 @@ def _get_input_manifest_keys(
     except ClientError as err:
         raise JobAttachmentsError(f"Failed to get job metadata: {str(err)}")
 
+    # Handle case where job has no input manifests
     if "attachments" not in job_metadata or "manifests" not in job_metadata["attachments"]:
-        raise JobAttachmentsError(
-            "Job metadata missing expected attachments or manifests structure"
-        )
+        return []
 
     manifest_data: Dict[str, Any] = job_metadata["attachments"]["manifests"]
 
     manifest_keys: List[str] = []
     for manifest in manifest_data:
+        if "inputManifestPath" not in manifest:
+            # Skip if there's no input manifest - job may have no input assets
+            continue
+
         manifest_path: str = manifest["inputManifestPath"]
         full_s3_path: str = f"{cleaned_root_prefix}/Manifests/{manifest_path}"
         manifest_keys.append(full_s3_path)
