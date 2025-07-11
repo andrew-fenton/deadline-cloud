@@ -1440,8 +1440,8 @@ def _get_all_manifest_s3_keys_for_job(
     Raises:
         JobAttachmentsError: If there's any error retrieving the manifests
     """
-    root_prefix = job_attachment_settings.rootPrefix.rstrip("/")
-    output_manifest_prefix = f"{root_prefix}/Manifests/{farm_id}/{queue_id}/{job_id}/"
+    root_prefix: str = job_attachment_settings.rootPrefix.rstrip("/")
+    output_manifest_prefix: str = f"{root_prefix}/Manifests/{farm_id}/{queue_id}/{job_id}/"
 
     try:
         input_manifest_keys: List[str] = _get_input_manifest_keys(
