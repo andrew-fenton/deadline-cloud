@@ -1480,7 +1480,7 @@ def _get_input_manifest_keys_for_job(
     if "attachments" not in job_metadata or "manifests" not in job_metadata["attachments"]:
         return []
 
-    manifest_data: Dict[str, Any] = job_metadata["attachments"]["manifests"]
+    manifest_data: List[Dict[str, Any]] = job_metadata["attachments"]["manifests"]
 
     manifest_keys: List[str] = []
     for manifest in manifest_data:
