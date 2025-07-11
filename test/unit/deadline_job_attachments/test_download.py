@@ -2658,6 +2658,7 @@ def test_get_input_manifest_keys_for_job_missing_manifests():
 
     assert result == []
 
+
 def test_get_input_manifest_keys_for_job_missing_input_manifest_path():
     """Test when a manifest is missing inputManifestPath key"""
     mock_session = MagicMock()
@@ -2682,6 +2683,7 @@ def test_get_input_manifest_keys_for_job_missing_input_manifest_path():
 
     assert result == ["DeadlineCloud/Manifests/farm-id/queue-id/Inputs/123/manifest_input"]
 
+
 def test_get_all_manifest_s3_keys_happy_path():
     """Test retrieving both input and output manifest keys successfully"""
     mock_session: MagicMock = MagicMock()
@@ -2699,7 +2701,8 @@ def test_get_all_manifest_s3_keys_happy_path():
     ]
 
     with patch(
-        "deadline.job_attachments.download._get_input_manifest_keys_for_job", return_value=input_keys
+        "deadline.job_attachments.download._get_input_manifest_keys_for_job",
+        return_value=input_keys,
     ), patch(
         "deadline.job_attachments.download._get_tasks_manifests_keys_from_s3",
         return_value=output_keys,
@@ -2727,7 +2730,8 @@ def test_get_all_manifest_s3_keys_only_input_manifests():
     ]
 
     with patch(
-        "deadline.job_attachments.download._get_input_manifest_keys_for_job", return_value=input_keys
+        "deadline.job_attachments.download._get_input_manifest_keys_for_job",
+        return_value=input_keys,
     ), patch(
         "deadline.job_attachments.download._get_tasks_manifests_keys_from_s3", return_value=[]
     ):

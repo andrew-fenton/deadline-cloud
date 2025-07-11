@@ -22,10 +22,7 @@ from boto3.s3.transfer import ProgressCallbackInvoker
 from botocore.client import BaseClient
 from botocore.exceptions import BotoCoreError, ClientError
 
-from .asset_manifests.base_manifest import (
-    BaseAssetManifest,
-    BaseManifestPath as RelativeFilePath,
-)
+from .asset_manifests.base_manifest import BaseAssetManifest, BaseManifestPath as RelativeFilePath
 from .asset_manifests.hash_algorithms import HashAlgorithm
 from .asset_manifests.decode import decode_manifest
 from .exceptions import (
@@ -759,14 +756,7 @@ def get_job_output_paths_by_asset_root(
     Returns a dict of ManifestPathGroups, with the root path as the key.
     """
     output_manifests_by_root = get_output_manifests_by_asset_root(
-        s3_settings,
-        farm_id,
-        queue_id,
-        job_id,
-        step_id,
-        task_id,
-        session_action_id,
-        session=session,
+        s3_settings, farm_id, queue_id, job_id, step_id, task_id, session_action_id, session=session
     )
 
     outputs: dict[str, ManifestPathGroup] = {}
@@ -807,10 +797,7 @@ def get_output_manifests_by_asset_root(
     with concurrent.futures.ThreadPoolExecutor(max_workers=S3_DOWNLOAD_MAX_CONCURRENCY) as executor:
         futures = [
             executor.submit(
-                get_asset_root_and_manifest_from_s3,
-                key,
-                s3_settings.s3BucketName,
-                session,
+                get_asset_root_and_manifest_from_s3, key, s3_settings.s3BucketName, session
             )
             for key in manifests_keys
         ]
@@ -983,9 +970,7 @@ def _set_fs_group(
         )
 
 
-def merge_asset_manifests(
-    manifests: list[BaseAssetManifest],
-) -> BaseAssetManifest | None:
+def merge_asset_manifests(manifests: list[BaseAssetManifest]) -> BaseAssetManifest | None:
     """Merge files from multiple manifests into a single list, ensuring that each filename
     is unique by keeping the one from the last encountered manifest. (Thus, the steps'
     outputs are downloaded over the input job attachments.)
@@ -1067,11 +1052,7 @@ def _merge_asset_manifests_sorted_asc_by_last_modified(
 
 def _write_manifest_to_temp_file(manifest: BaseAssetManifest, dir: Path) -> str:
     with NamedTemporaryFile(
-        suffix=".json",
-        prefix="deadline-merged-manifest-",
-        delete=False,
-        mode="w",
-        dir=dir,
+        suffix=".json", prefix="deadline-merged-manifest-", delete=False, mode="w", dir=dir
     ) as file:
         file.write(manifest.encode())
         return file.name
