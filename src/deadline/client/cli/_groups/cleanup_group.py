@@ -85,7 +85,8 @@ def cleanup_bucket(retention_days: int, **args):
     os.makedirs(STORAGE_PATH, exist_ok=True)
 
     active_job_ids = sweeper.get_active_job_ids(retention_days=retention_days)
-    print("Active jobs:", active_job_ids)
+    print("Got active job IDs:")
+    print(active_job_ids)
 
     for job_id in active_job_ids:
         job_attachments.download_manifests(job_id)
@@ -100,9 +101,18 @@ def cleanup_bucket(retention_days: int, **args):
         storage.store_keep_manifest(keep_files_manifest)
         job_attachments.cleanup_downloaded_manifests(job_id)
 
+    print("Downloaded all manifests from S3.")
+
     keep_assets = sweeper.get_files_to_keep(active_job_ids)
+
+    print(f"Extracted {len(keep_assets)} assets to retain from manifests.")
+
     delete_files = sweeper.get_delete_files_list(
         retention_days, keep_assets, active_job_ids
+    )
+
+    print(
+        f"Compared the {len(keep_assets)} assets to retain against the JA bucket and found {len(delete_files)} to delete."
     )
 
     file_path = sweeper.create_tag_manifest(
@@ -114,7 +124,7 @@ def cleanup_bucket(retention_days: int, **args):
     sweeper.create_batch_tag_s3_job(s3_manifest_prefix)
 
     # Cleanup keep manifests
-    shutil.rmtree(STORAGE_PATH)
+    # shutil.rmtree(STORAGE_PATH)
 
     print("Done.")
 
@@ -224,8 +234,12 @@ class JobAttachmentsHandler(JobAttachmentsInterface):
         os.makedirs(job_manifests_path, exist_ok=True)
 
         input_manifest_key = self._get_input_manifest_key(job_id)
-        self._download_input_manifest(job_manifests_path, input_manifest_key)
+
+        if input_manifest_key:
+            self._download_input_manifest(job_manifests_path, input_manifest_key)
         self._download_output_manifests(job_manifests_path, job_id)
+
+        print(f"Downloaded manifests for {job_id}")
 
     def _get_input_manifest_key(self, job_id):
         response = self.deadline.get_job(
@@ -239,14 +253,17 @@ class JobAttachmentsHandler(JobAttachmentsInterface):
                 manifest_location = manifest["inputManifestPath"]
                 break
 
-        manifest_key = f"DeadlineCloud/Manifests/{manifest_location}"
-        print(manifest_key)
+        if manifest_location:
+            manifest_key = f"DeadlineCloud/Manifests/{manifest_location}"
+        else:
+            manifest_key = ""
 
         return manifest_key
 
     def _download_input_manifest(self, write_path, input_manifest_key):
         split_key = input_manifest_key.split("/")
         file_write_path = os.path.join(write_path, split_key[-1])
+
         return self.s3.download_file(
             self.bucket_name, input_manifest_key, file_write_path
         )
@@ -268,7 +285,7 @@ class JobAttachmentsHandler(JobAttachmentsInterface):
 
     def cleanup_downloaded_manifests(self, job_id):
         manifests_path = os.path.join(self.root_path, job_id)
-        shutil.rmtree(manifests_path)
+        # shutil.rmtree(manifests_path)
 
     def retrieve_manifests(self, job_id) -> List[BaseAssetManifest]:
         manifests: List[BaseAssetManifest] = []
@@ -339,9 +356,9 @@ class SweeperProcessor:
                 if not created_date and not ended_date:
                     active_jobs.append(job_id)
 
-                elif self._run_within_retention_period(
+                if self._run_within_retention_period(
                     created_date, ended_date, retention_days_ago
-                ) or self._is_a_running_job(job_status):
+                ):
                     active_jobs.append(job_id)
 
             # Break out of loop if no more jobs to list
@@ -388,9 +405,6 @@ class SweeperProcessor:
         return list(keep_assets)
 
     def get_delete_files_list(self, retention_days, keep_assets_list, active_job_ids):
-        if not keep_assets_list or not active_job_ids:
-            return []
-
         delete_list = []
         for page in self.job_attachments.list_objects():
             for obj in page:
