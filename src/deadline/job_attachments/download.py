@@ -15,7 +15,7 @@ from itertools import chain
 from logging import Logger, LoggerAdapter, getLogger
 from pathlib import Path
 from tempfile import NamedTemporaryFile
-from typing import Any, Callable, DefaultDict, List, Optional, Tuple, Union, Dict
+from typing import Any, Callable, DefaultDict, List, Optional, Tuple, Union
 
 import boto3
 from boto3.s3.transfer import ProgressCallbackInvoker
@@ -57,7 +57,6 @@ from .progress_tracker import (
 )
 from ._aws.aws_clients import (
     get_account_id,
-    get_deadline_client,
     get_s3_client,
     get_s3_max_pool_connections,
     get_s3_transfer_manager,
@@ -1355,141 +1354,3 @@ class OutputDownloader:
         progress_tracker.total_time = time.perf_counter() - start_time
 
         return progress_tracker.get_download_summary_statistics(downloaded_files_paths_by_root)
-
-
-def _download_job_manifests_using_s3_keys(
-    session: boto3.Session,
-    manifest_keys: List[str],
-    job_attachment_settings: JobAttachmentS3Settings,
-    download_directory: str,
-) -> None:
-    """
-    Downloads job manifests from S3 to a local directory using provided S3 keys.
-
-    Note: Current implementation downloads sequentially. Future optimization
-    opportunity exists for parallel downloads.
-
-    Args:
-        session: boto3 Session
-        manifest_keys: List of S3 object keys for manifest files
-        job_attachment_settings: S3 job attachments settings
-        download_directory: Local directory path where manifests will be saved
-
-    Raises:
-        JobAttachmentsError: If manifest keys are malformed or if there are IO errors
-        JobAttachmentS3BotoCoreError: If there are AWS S3 errors (excluding missing files)
-    """
-    s3 = get_s3_client(session=session)
-
-    for manifest_key in manifest_keys:
-        split_key = manifest_key.split("/")
-
-        if len(split_key) < 2:
-            raise JobAttachmentsError(
-                f"Invalid manifest key structure: {manifest_key}. Expected at least 2 path segments."
-            )
-
-        file_name = f"{split_key[-2]}_{split_key[-1]}"
-        local_file_path = os.path.join(download_directory, file_name)
-
-        try:
-            s3.download_file(job_attachment_settings.s3BucketName, manifest_key, local_file_path)
-        except (ClientError, IOError) as err:
-            raise JobAttachmentsError(f"Failed to download manifest {manifest_key}: {err}") from err
-
-
-def _get_all_manifest_s3_keys_for_job(
-    session: boto3.Session,
-    job_attachment_settings: JobAttachmentS3Settings,
-    farm_id: str,
-    queue_id: str,
-    job_id: str,
-) -> List[str]:
-    """
-    Retrieves all manifest (both input and output) S3 keys for a specific job.
-
-    Args:
-        session: boto3 Session for AWS credentials
-        job_attachment_settings: S3 job attachments settings
-        farm_id: Deadline farm identifier
-        queue_id: Deadline queue identifier
-        job_id: Deadline job identifier
-
-    Returns:
-        List[str]: Combined list of input and output manifest S3 keys
-
-    Raises:
-        JobAttachmentsError: If there's any error retrieving the manifests
-    """
-    root_prefix: str = job_attachment_settings.rootPrefix.rstrip("/")
-    output_manifest_prefix: str = f"{root_prefix}/Manifests/{farm_id}/{queue_id}/{job_id}/"
-
-    try:
-        input_manifest_keys: List[str] = _get_input_manifest_keys_for_job(
-            session=session,
-            s3_root_prefix=job_attachment_settings.rootPrefix,
-            farm_id=farm_id,
-            queue_id=queue_id,
-            job_id=job_id,
-        )
-        output_manifest_keys: List[str] = _get_tasks_manifests_keys_from_s3(
-            manifest_prefix=output_manifest_prefix,
-            s3_bucket=job_attachment_settings.s3BucketName,
-            session=session,
-        )
-    except Exception as err:
-        raise JobAttachmentsError(f"Failed to get all job manifest keys: {str(err)}") from err
-
-    return input_manifest_keys + output_manifest_keys
-
-
-def _get_input_manifest_keys_for_job(
-    session: boto3.Session,
-    s3_root_prefix: str,
-    farm_id: str,
-    queue_id: str,
-    job_id: str,
-) -> List[str]:
-    """
-    Retrieves S3 keys for input manifests associated with a specific Deadline job.
-
-    Args:
-        session: boto3 Session
-        s3_root_prefix: Base S3 path prefix user for job attachments
-        farm_id: Deadline farm identifier
-        queue_id: Deadline queue identifier
-        job_id: Deadline job identifier
-
-    Returns:
-        List[str]: Full S3 object keys for the input manifests
-
-    Raises:
-        JobAttachmentsError: If job metadata can't be retrieved or doesn't contain expected structure
-    """
-    cleaned_root_prefix: str = s3_root_prefix.rstrip("/")
-    deadline: BaseClient = get_deadline_client(session=session)
-
-    try:
-        job_metadata: Dict[str, Any] = deadline.get_job(
-            farmId=farm_id, queueId=queue_id, jobId=job_id
-        )
-    except ClientError as err:
-        raise JobAttachmentsError(f"Failed to get job metadata: {str(err)}")
-
-    # Handle case where job has no input manifests
-    if "attachments" not in job_metadata or "manifests" not in job_metadata["attachments"]:
-        return []
-
-    manifest_data: List[Dict[str, Any]] = job_metadata["attachments"]["manifests"]
-
-    manifest_keys: List[str] = []
-    for manifest in manifest_data:
-        if "inputManifestPath" not in manifest:
-            # Skip if there's no input manifest - job may have no input assets
-            continue
-
-        manifest_path: str = manifest["inputManifestPath"]
-        full_s3_path: str = f"{cleaned_root_prefix}/Manifests/{manifest_path}"
-        manifest_keys.append(full_s3_path)
-
-    return manifest_keys
