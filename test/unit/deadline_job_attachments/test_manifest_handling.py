@@ -1,17 +1,25 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 
+from deadline.job_attachments.asset_manifests.hash_algorithms import HashAlgorithm
 import pytest
 
+from pathlib import Path
 from typing import List
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, mock_open, patch
 from botocore.exceptions import ClientError
 
 from deadline.job_attachments.manifest_handling import (
+    _extract_asset_hashes_from_manifests,
     _get_all_manifest_s3_keys_for_job,
     _get_input_manifest_keys_for_job,
+    _load_manifests_from_disk,
 )
 from deadline.job_attachments.exceptions import JobAttachmentsError
-from deadline.job_attachments.models import JobAttachmentS3Settings
+from deadline.job_attachments.models import AssetHash, JobAttachmentS3Settings
+from deadline.job_attachments.asset_manifests.base_manifest import (
+    BaseAssetManifest,
+)
+from deadline.job_attachments.asset_manifests.decode import decode_manifest
 
 
 class TestManifestHandling:
@@ -270,3 +278,188 @@ class TestManifestHandling:
         assert "Failed to get all job manifest keys: Failed to retrieve output manifests" in str(
             error.value
         )
+
+    def test_load_manifests_from_disk_multiple_files_happy_path(self, tmp_path: Path):
+        """Test loading multiple manifest files from disk successfully"""
+        manifests_dir: Path = tmp_path / "manifests"
+        manifests_dir.mkdir()
+
+        manifest_content_1: str = """
+        {
+            "hashAlg": "xxh128",
+            "manifestVersion": "2023-03-03",
+            "paths": [
+                {
+                    "hash": "hash1",
+                    "mtime": 1,
+                    "path": "path1",
+                    "size": 1
+                },
+                {
+                    "hash": "hash2",
+                    "mtime": 2,
+                    "path": "path2",
+                    "size": 2
+                }
+            ],
+            "totalSize": 3
+        }"""
+
+        manifest_content_2: str = """
+        {
+            "hashAlg": "xxh128",
+            "manifestVersion": "2023-03-03",
+            "paths": [
+                {
+                    "hash": "hash3",
+                    "mtime": 3,
+                    "path": "path3",
+                    "size": 3
+                }
+            ],
+            "totalSize": 3
+        }"""
+
+        # Create manifest files
+        (manifests_dir / "manifest1.json").write_text(manifest_content_1)
+        (manifests_dir / "manifest2.json").write_text(manifest_content_2)
+
+        resulting_manifest_list: List[BaseAssetManifest] = _load_manifests_from_disk(manifests_directory=manifests_dir)
+
+        expected_manifest_1: BaseAssetManifest = decode_manifest(manifest_content_1)
+        expected_manifest_2: BaseAssetManifest = decode_manifest(manifest_content_2)
+
+        assert len(resulting_manifest_list) == 2
+        assert expected_manifest_1 in resulting_manifest_list
+        assert expected_manifest_2 in resulting_manifest_list
+
+    def test_load_manifests_from_disk_empty_directory(self, tmp_path: Path):
+        """Test loading from a directory with no manifest files"""
+        manifest_dir: Path = tmp_path / "manifests"
+        manifest_dir.mkdir()
+
+        manifests: List[BaseAssetManifest] = _load_manifests_from_disk(manifest_dir)
+
+        assert manifests == []
+
+    def test_load_manifests_from_disk_directory_not_exist(self):
+        """Test loading from a non-existent directory"""
+        with pytest.raises(JobAttachmentsError) as err:
+            _load_manifests_from_disk(Path("/nonexistent/directory"))
+
+        assert "Manifests directory does not exist" in str(err.value)
+
+    def test_load_manifests_from_disk_io_error(self, tmp_path):
+        """Test handling IO error when reading manifest file"""
+        manifest_dir: Path = tmp_path / "manifests"
+        manifest_dir.mkdir()
+
+        # Create a manifest file
+        manifest_path = manifest_dir / "manifest.json"
+        manifest_path.touch()
+
+        with patch.object(Path, 'read_text', side_effect=IOError("Permission denied")):
+            with pytest.raises(JobAttachmentsError) as err:
+                _load_manifests_from_disk(manifest_dir)
+
+            assert "Failed to load manifests from disk" in str(err.value)
+            assert "Permission denied" in str(err.value)
+
+    def test_extract_asset_hashes_happy_path(self):
+        """Test extracting hashes from multiple manifests successfully"""
+        manifest_content_1: str = """
+        {
+            "hashAlg": "xxh128",
+            "manifestVersion": "2023-03-03",
+            "paths": [
+                {
+                    "hash": "hash1",
+                    "mtime": 1,
+                    "path": "path1",
+                    "size": 1
+                },
+                {
+                    "hash": "hash2",
+                    "mtime": 2,
+                    "path": "path2",
+                    "size": 2
+                }
+            ],
+            "totalSize": 3
+        }"""
+
+        manifest_content_2: str = """
+        {
+            "hashAlg": "xxh128",
+            "manifestVersion": "2023-03-03",
+            "paths": [
+                {
+                    "hash": "hash3",
+                    "mtime": 3,
+                    "path": "path3",
+                    "size": 3
+                }
+            ],
+            "totalSize": 3
+        }"""
+
+        manifests: List[BaseAssetManifest] = [
+            decode_manifest(manifest_content_1),
+            decode_manifest(manifest_content_2),
+        ]
+
+        result: List[AssetHash] = _extract_asset_hashes_from_manifests(manifests)
+
+        assert len(result) == 3
+        assert AssetHash("hash1", HashAlgorithm.XXH128) in result
+        assert AssetHash("hash2", HashAlgorithm.XXH128) in result
+        assert AssetHash("hash3", HashAlgorithm.XXH128) in result
+
+    def test_extract_asset_hashes_with_duplicates(self):
+        """Test extracting hashes from manifests with duplicate hashes"""
+        manifest_content_1: str = """
+            {
+                "hashAlg": "xxh128",
+                "manifestVersion": "2023-03-03",
+                "paths": [
+                    {
+                        "hash": "hash1",
+                        "mtime": 1,
+                        "path": "path1",
+                        "size": 1
+                    },
+                    {
+                        "hash": "hash2",
+                        "mtime": 2,
+                        "path": "path2",
+                        "size": 2
+                    }
+                ],
+                "totalSize": 3
+            }"""
+
+        manifest_content_2: str = """
+            {
+                "hashAlg": "xxh128",
+                "manifestVersion": "2023-03-03",
+                "paths": [
+                    {
+                        "hash": "hash1",
+                        "mtime": 1,
+                        "path": "path1",
+                        "size": 1
+                    }
+                ],
+                "totalSize": 1
+            }"""
+
+        manifests: List[BaseAssetManifest] = [
+            decode_manifest(manifest_content_1),
+            decode_manifest(manifest_content_2),
+        ]
+
+        result: List[AssetHash] = _extract_asset_hashes_from_manifests(manifests)
+
+        assert len(result) == 2
+        assert AssetHash("hash1", HashAlgorithm.XXH128) in result
+        assert AssetHash("hash2", HashAlgorithm.XXH128) in result
