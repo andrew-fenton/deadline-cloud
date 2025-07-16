@@ -495,3 +495,11 @@ class UploadManifestInfo:
     output_manifest_path: str
     output_manifest_hash: str
     source_path: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class AssetHash:
+    """Data structure to store the hash and hash algorithm of an asset"""
+
+    hash: str
+    hash_alg: HashAlgorithm

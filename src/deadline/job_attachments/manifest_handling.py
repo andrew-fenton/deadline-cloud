@@ -1,15 +1,19 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 
+from pathlib import Path
 import boto3
+import os
 
 from botocore.client import BaseClient
 from botocore.exceptions import ClientError
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Set
 
 from deadline.job_attachments._aws.aws_clients import get_deadline_client
+from deadline.job_attachments.asset_manifests.base_manifest import BaseAssetManifest
+from deadline.job_attachments.asset_manifests.decode import decode_manifest
 from deadline.job_attachments.download import _get_tasks_manifests_keys_from_s3
 from deadline.job_attachments.exceptions import JobAttachmentsError
-from deadline.job_attachments.models import JobAttachmentS3Settings
+from deadline.job_attachments.models import AssetHash, JobAttachmentS3Settings
 
 
 def _get_all_manifest_s3_keys_for_job(
@@ -107,3 +111,62 @@ def _get_input_manifest_keys_for_job(
         manifest_keys.append(full_s3_path)
 
     return manifest_keys
+
+
+def _load_manifests_from_disk(manifests_directory: Path) -> List[BaseAssetManifest]:
+    """
+    Load and decode asset manifests from files in the specified directory.
+
+    Args:
+        manifests_directory: Path to the directory containing manifest files.
+
+    Returns:
+        List[BaseAssetManifest]: List of decoded manifest objects.
+
+    Raises:
+        JobAttachmentsError: If the manifests directory doesn't exist, if there's an error
+            while loading/decoding any manifest file.
+
+    Note:
+        If a file in the directory is not a manifest, the decode_manifest will raise a validation
+        error upon reading.
+    """
+    if not manifests_directory.exists():
+        raise JobAttachmentsError(f"Manifests directory does not exist: {manifests_directory}")
+
+    manifests: List[BaseAssetManifest] = []
+
+    for manifest_path in manifests_directory.iterdir():
+        try:
+            manifest_data = manifest_path.read_text(encoding="utf-8")
+            manifest: BaseAssetManifest = decode_manifest(manifest_data)
+            manifests.append(manifest)
+        except Exception as err:
+            raise JobAttachmentsError(f"Failed to load manifests from disk: {str(err)}") from err
+
+    return manifests
+
+
+def _extract_asset_hashes_from_manifests(
+    manifests: List[BaseAssetManifest],
+) -> List[AssetHash]:
+    """
+    Extract unique asset hashes from a list of asset manifests.
+
+    Args:
+        manifests: A list of asset manifest objects.
+
+    Returns:
+        List[AssetHash]: A list of unique AssetHash objects, each containing:
+            - hash: The hash value of the asset
+            - hash_alg: The hash algorithm used for the asset
+    """
+    asset_hashes: Set[AssetHash] = set()
+
+    for manifest in manifests:
+        for path in manifest.paths:
+            if path.hash:
+                asset_hash: AssetHash = AssetHash(path.hash, manifest.hashAlg)
+                asset_hashes.add(asset_hash)
+
+    return list(asset_hashes)
