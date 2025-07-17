@@ -503,3 +503,12 @@ class AssetHash:
 
     hash: str
     hash_alg: HashAlgorithm
+
+
+@dataclass
+class RetentionRecord:
+    """Data structure to store retention records"""
+
+    queue_id: str
+    job_id: str
+    s3_object_key: str

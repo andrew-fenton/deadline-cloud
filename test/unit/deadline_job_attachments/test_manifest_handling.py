@@ -5,7 +5,7 @@ import pytest
 
 from pathlib import Path
 from typing import List
-from unittest.mock import MagicMock, mock_open, patch
+from unittest.mock import MagicMock, patch
 from botocore.exceptions import ClientError
 
 from deadline.job_attachments.manifest_handling import (
@@ -324,7 +324,9 @@ class TestManifestHandling:
         (manifests_dir / "manifest1.json").write_text(manifest_content_1)
         (manifests_dir / "manifest2.json").write_text(manifest_content_2)
 
-        resulting_manifest_list: List[BaseAssetManifest] = _load_manifests_from_disk(manifests_directory=manifests_dir)
+        resulting_manifest_list: List[BaseAssetManifest] = _load_manifests_from_disk(
+            manifests_directory=manifests_dir
+        )
 
         expected_manifest_1: BaseAssetManifest = decode_manifest(manifest_content_1)
         expected_manifest_2: BaseAssetManifest = decode_manifest(manifest_content_2)
@@ -358,7 +360,7 @@ class TestManifestHandling:
         manifest_path = manifest_dir / "manifest.json"
         manifest_path.touch()
 
-        with patch.object(Path, 'read_text', side_effect=IOError("Permission denied")):
+        with patch.object(Path, "read_text", side_effect=IOError("Permission denied")):
             with pytest.raises(JobAttachmentsError) as err:
                 _load_manifests_from_disk(manifest_dir)
 

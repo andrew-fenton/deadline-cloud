@@ -2,7 +2,6 @@
 
 from pathlib import Path
 import boto3
-import os
 
 from botocore.client import BaseClient
 from botocore.exceptions import ClientError
