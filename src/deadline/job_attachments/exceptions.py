@@ -199,3 +199,11 @@ class JobAttachmentsSweeperError(BucketSweeperError):
     """
     Exception for manifest processing in bucket sweeper.
     """
+
+
+class RetentionRecordHandlerError(Exception):
+    """Error for retention record handler operations"""
+
+    def __init__(self, message):
+        self.message = message
+        super().__init__(message)
