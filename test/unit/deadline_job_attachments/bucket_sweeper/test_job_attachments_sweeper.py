@@ -1,16 +1,18 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 
 from botocore.exceptions import BotoCoreError
+from deadline.job_attachments.models import RetentionRecord
 import pytest
 import os
 import csv
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Set
 from pathlib import Path
 from unittest.mock import Mock
 from deadline.job_attachments.bucket_sweeper.job_attachments_sweeper import JobAttachmentsSweeper
 from deadline.job_attachments.exceptions import (
     JobAttachmentsSweeperError,
     JobAttachmentS3BotoCoreError,
+    RetentionRecordHandlerError,
 )
 
 
@@ -33,12 +35,21 @@ def mock_deadline() -> Mock:
 
 
 @pytest.fixture
-def processor(mock_s3: Mock, mock_s3_control: Mock, mock_deadline: Mock) -> JobAttachmentsSweeper:
+def mock_record_handler() -> Mock:
+    """Fixture to create mock RetentionRecordHandler"""
+    return Mock()
+
+
+@pytest.fixture
+def processor(
+    mock_s3: Mock, mock_s3_control: Mock, mock_deadline: Mock, mock_record_handler: Mock
+) -> JobAttachmentsSweeper:
     """Fixture to create JobAttachmentsSweeper instance with mock clients"""
     return JobAttachmentsSweeper(
         s3_client=mock_s3,
         s3_control_client=mock_s3_control,
         deadline_client=mock_deadline,
+        retention_record_handler=mock_record_handler,
         farm_id="test-farm",
         account_id="test-account-id",
         role_arn="test-role-arn",
@@ -56,6 +67,76 @@ def test_dir(tmp_path: Path) -> Path:
 
 
 class TestJobAttachmentsSweeper:
+    def test_get_attachments_to_retain_happy_path(self, processor: JobAttachmentsSweeper):
+        """Tests retrieving attachments to retain with multiple queues and jobs."""
+        queue_job_id_map: Dict[str, List[str]] = {
+            "queue-1": ["job-1"],
+            "queue-2": ["job-2"],
+            "queue-3": ["job-3"],
+        }
+
+        mock_records: List[RetentionRecord] = [
+            RetentionRecord(queue_id="queue-1", job_id="job-1", s3_object_key="key-1"),
+            RetentionRecord(queue_id="queue-2", job_id="job-2", s3_object_key="key-2"),
+            RetentionRecord(queue_id="queue-3", job_id="job-3", s3_object_key="key-3"),
+        ]
+
+        processor.retention_record_handler.get_retention_records.return_value = mock_records
+
+        result: Set[str] = processor.get_attachments_to_retain(queue_job_id_map)
+
+        processor.retention_record_handler.get_retention_records.assert_called_once_with(
+            queue_job_id_map=queue_job_id_map
+        )
+        assert result == {"key-1", "key-2", "key-3"}
+
+    def test_get_attachments_to_retain_deduplication(self, processor: JobAttachmentsSweeper):
+        """Tests deduplication of attachment keys."""
+        queue_job_id_map: Dict[str, List[str]] = {"queue-1": ["job-1", "job-2"]}
+
+        mock_records: List[RetentionRecord] = [
+            # Both jobs have the same set of keys
+            RetentionRecord(queue_id="queue-1", job_id="job-1", s3_object_key="key-1"),
+            RetentionRecord(queue_id="queue-1", job_id="job-1", s3_object_key="key-2"),
+            RetentionRecord(queue_id="queue-1", job_id="job-2", s3_object_key="key-1"),
+            RetentionRecord(queue_id="queue-1", job_id="job-2", s3_object_key="key-2"),
+        ]
+
+        processor.retention_record_handler.get_retention_records.return_value = mock_records
+
+        result: Set[str] = processor.get_attachments_to_retain(queue_job_id_map)
+
+        assert len(result) == 2
+        assert result == {"key-1", "key-2"}
+
+    def test_get_attachments_to_retain_empty_map(self, processor: JobAttachmentsSweeper):
+        """Tests behavior with empty queue job map."""
+        queue_job_id_map: Dict[str, List[str]] = {}
+
+        processor.retention_record_handler.get_retention_records.return_value = []
+
+        result: Set[str] = processor.get_attachments_to_retain(queue_job_id_map)
+
+        processor.retention_record_handler.get_retention_records.assert_called_once_with(
+            queue_job_id_map=queue_job_id_map
+        )
+        assert result == set()
+
+    def test_get_attachments_to_retain_handler_error(self, processor: JobAttachmentsSweeper):
+        """Tests error handling when record handler fails."""
+        queue_job_id_map: Dict[str, List[str]] = {"queue-1": ["job-1"]}
+
+        error_message: str = "Failed to retrieve records"
+        processor.retention_record_handler.get_retention_records.side_effect = (
+            RetentionRecordHandlerError(error_message)
+        )
+
+        with pytest.raises(JobAttachmentsSweeperError) as err:
+            processor.get_attachments_to_retain(queue_job_id_map)
+
+        assert "Failed to get retention records" in str(err.value)
+        assert error_message in str(err.value)
+
     def test_create_tag_manifest_empty_list(self, processor: JobAttachmentsSweeper, test_dir: Path):
         """Test creating a tag manifest with an empty delete list."""
         test_file_path = test_dir / "empty_manifest.csv"

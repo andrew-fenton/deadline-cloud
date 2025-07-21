@@ -2,11 +2,20 @@
 
 import csv
 
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Set
 from botocore.exceptions import BotoCoreError
 from botocore.client import BaseClient
 
-from ..exceptions import JobAttachmentsSweeperError, JobAttachmentS3BotoCoreError
+from deadline.job_attachments.bucket_sweeper.retention_record_handler import (
+    RetentionRecordHandlerInterface,
+)
+from deadline.job_attachments.models import RetentionRecord
+
+from ..exceptions import (
+    JobAttachmentsSweeperError,
+    JobAttachmentS3BotoCoreError,
+    RetentionRecordHandlerError,
+)
 
 
 class JobAttachmentsSweeper:
@@ -17,6 +26,7 @@ class JobAttachmentsSweeper:
         s3_client: BaseClient,
         s3_control_client: BaseClient,
         deadline_client: BaseClient,
+        retention_record_handler: RetentionRecordHandlerInterface,
         farm_id: str,
         account_id: str,
         role_arn: str,
@@ -41,10 +51,46 @@ class JobAttachmentsSweeper:
         self.s3 = s3_client
         self.s3_control = s3_control_client
         self.deadline = deadline_client
+        self.retention_record_handler = retention_record_handler
         self.farm_id = farm_id
         self.account_id = account_id
         self.role_arn = role_arn
         self.bucket_name = bucket_name
+
+    def get_attachments_to_retain(self, queue_job_id_map: Dict[str, List[str]]) -> Set[str]:
+        """
+        Retrieves a set of S3 object keys that should be retained based on queue and job IDs.
+
+        This method queries the retention record handler to get retention records for the specified
+        queue and job IDs, then extracts the unique S3 object keys from those records. The returned
+        set contains S3 object keys that should be retained during cleanup operations.
+
+        Args:
+            queue_job_id_map: A dictionary mapping queue IDs to lists of job IDs. For each queue ID,
+                            the associated job IDs will be used to find retention records.
+                Example: { "queue-1": ["job-1"], "queue-2": ["job-2"] }
+
+        Returns:
+            Set[str]: A set of unique S3 object keys that should be retained.
+
+        Raises:
+            JobAttachmentsSweeperError: If there's an error retrieving retention records from the
+                                    record handler.
+
+        Note:
+            If the queue_job_id_map is empty or if no retention records are found for the specified
+            queue and job IDs, an empty set will be returned.
+        """
+        try:
+            records: List[RetentionRecord] = self.retention_record_handler.get_retention_records(
+                queue_job_id_map=queue_job_id_map
+            )
+        except RetentionRecordHandlerError as err:
+            raise JobAttachmentsSweeperError(message=f"Failed to get retention records: {str(err)}")
+
+        retain_object_keys: Set[str] = {record.s3_object_key for record in records}
+
+        return retain_object_keys
 
     def _create_tag_manifest(self, file_path: str, delete_list: List[str]) -> None:
         """
