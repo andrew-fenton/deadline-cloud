@@ -207,3 +207,9 @@ class RetentionRecordHandlerError(Exception):
     def __init__(self, message):
         self.message = message
         super().__init__(message)
+
+
+class JobAttachmentsS3BucketListerError(JobAttachmentsError):
+    """
+    Exception for errors related to listing job attachments.
+    """

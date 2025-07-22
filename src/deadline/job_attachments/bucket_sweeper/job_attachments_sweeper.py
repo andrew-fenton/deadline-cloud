@@ -2,19 +2,22 @@
 
 import csv
 
+from datetime import datetime
 from typing import List, Dict, Any, Set
 from botocore.exceptions import BotoCoreError
 from botocore.client import BaseClient
 
-from deadline.job_attachments.bucket_sweeper.retention_record_handler import (
-    RetentionRecordHandlerInterface,
-)
-from deadline.job_attachments.models import RetentionRecord
-
 from ..exceptions import (
+    JobAttachmentsS3BucketListerError,
     JobAttachmentsSweeperError,
     JobAttachmentS3BotoCoreError,
     RetentionRecordHandlerError,
+)
+from ..job_attachments_s3_bucket_lister import JobAttachmentsS3BucketLister
+
+from deadline.job_attachments.models import RetentionRecord
+from deadline.job_attachments.bucket_sweeper.retention_record_handler import (
+    RetentionRecordHandlerInterface,
 )
 
 
@@ -27,6 +30,7 @@ class JobAttachmentsSweeper:
         s3_control_client: BaseClient,
         deadline_client: BaseClient,
         retention_record_handler: RetentionRecordHandlerInterface,
+        job_attachments_s3_bucket_lister: JobAttachmentsS3BucketLister,
         farm_id: str,
         account_id: str,
         role_arn: str,
@@ -35,10 +39,16 @@ class JobAttachmentsSweeper:
         """
         Initializes the JobAttachmentsSweeper.
 
+        Note:
+            IMPORTANT: Do not mix different lister implementations. S3 Inventory manifests
+            represent snapshots of bucket while direct S3 listing shows current state. Using both
+            could lead to premature file deletion.
+
         Args:
             s3_client: AWS S3 client for basic S3 operations
             s3_control_client: AWS S3 Control client for batch operations
             deadline_client: Client for interacting with Deadline
+            job_attachments_s3_bucket_lister: Component to list job attachments from an S3 bucket
             farm_id (str): The target farm_id to cleanup
             account_id (str): AWS account ID for the batch operation
             role_arn (str): The ARN of the IAM role for executing batch jobs.
@@ -52,6 +62,7 @@ class JobAttachmentsSweeper:
         self.s3_control = s3_control_client
         self.deadline = deadline_client
         self.retention_record_handler = retention_record_handler
+        self.job_attachments_s3_bucket_lister = job_attachments_s3_bucket_lister
         self.farm_id = farm_id
         self.account_id = account_id
         self.role_arn = role_arn
@@ -91,6 +102,49 @@ class JobAttachmentsSweeper:
         retain_object_keys: Set[str] = {record.s3_object_key for record in records}
 
         return retain_object_keys
+
+    def get_attachments_to_delete(
+        self, s3_keys_to_retain: Set[str], retention_datetime: datetime, root_prefix: str
+    ) -> List[str]:
+        """
+        Identifies S3 objects within a Job Attachments bucket root prefix that should be deleted.
+
+        This function retains S3 objects if either option is true:
+            1. They are explicitly listed in s3_keys_to_retain
+            2. They were modified after or at the retention_datetime threshold
+
+        Args:
+            s3_keys_to_retain: List of S3 object keys that should be explicitly retained
+            retention_datetime: Datetime threshold - objects modified before this date and not in the
+                retain list will be deleted. Objects after or at this date will be kept.
+            root_prefix: Job attachments S3 bucket root prefix
+
+        Returns:
+            List[str]: S3 object keys that should be deleted according to retention rules
+
+        Note:
+            The method checks the last_modified date as new jobs may have been submitted
+            since listing jobs, ensuring we don't delete recently created attachments.
+        """
+        delete_list: List[str] = []
+        try:
+            for s3_object in self.job_attachments_s3_bucket_lister.list_job_attachments(
+                prefix=root_prefix
+            ):
+                if (
+                    s3_object.key in s3_keys_to_retain
+                    # Check if S3Object was modified more recently than or at the retention_datetime
+                    or s3_object.last_modified >= retention_datetime
+                ):
+                    continue
+
+                delete_list.append(s3_object.key)
+        except JobAttachmentsS3BucketListerError as err:
+            raise JobAttachmentsSweeperError(
+                message=f"Failed to list objects for deletion: {str(err)}"
+            ) from err
+
+        return delete_list
 
     def _create_tag_manifest(self, file_path: str, delete_list: List[str]) -> None:
         """

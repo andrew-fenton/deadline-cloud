@@ -10,8 +10,9 @@ import sys
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Any, List, Optional, Set
+from typing import Any, List, Optional, Set, NamedTuple
 from urllib.parse import urlparse
+from datetime import datetime
 
 from deadline.job_attachments.asset_manifests import HashAlgorithm, hash_data
 from deadline.job_attachments.asset_manifests.base_manifest import (
@@ -512,3 +513,12 @@ class RetentionRecord:
     queue_id: str
     job_id: str
     s3_object_key: str
+
+
+class S3ObjectData(NamedTuple):
+    """Represents S3 object metadata"""
+
+    key: str
+    size: int
+    last_modified: datetime
+    etag: str
