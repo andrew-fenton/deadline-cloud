@@ -1,15 +1,19 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 
-from botocore.exceptions import BotoCoreError
-from deadline.job_attachments.models import RetentionRecord
 import pytest
 import os
 import csv
+
+from datetime import datetime
 from typing import Dict, List, Any, Set
 from pathlib import Path
+from botocore.exceptions import BotoCoreError
 from unittest.mock import Mock
+
+from deadline.job_attachments.models import RetentionRecord, S3ObjectData
 from deadline.job_attachments.bucket_sweeper.job_attachments_sweeper import JobAttachmentsSweeper
 from deadline.job_attachments.exceptions import (
+    JobAttachmentsS3BucketListerError,
     JobAttachmentsSweeperError,
     JobAttachmentS3BotoCoreError,
     RetentionRecordHandlerError,
@@ -41,8 +45,18 @@ def mock_record_handler() -> Mock:
 
 
 @pytest.fixture
+def mock_lister() -> Mock:
+    """Fixture to create mock JobAttachmentsLister"""
+    return Mock()
+
+
+@pytest.fixture
 def processor(
-    mock_s3: Mock, mock_s3_control: Mock, mock_deadline: Mock, mock_record_handler: Mock
+    mock_s3: Mock,
+    mock_s3_control: Mock,
+    mock_deadline: Mock,
+    mock_record_handler: Mock,
+    mock_lister: Mock,
 ) -> JobAttachmentsSweeper:
     """Fixture to create JobAttachmentsSweeper instance with mock clients"""
     return JobAttachmentsSweeper(
@@ -50,6 +64,7 @@ def processor(
         s3_control_client=mock_s3_control,
         deadline_client=mock_deadline,
         retention_record_handler=mock_record_handler,
+        job_attachments_s3_bucket_lister=mock_lister,
         farm_id="test-farm",
         account_id="test-account-id",
         role_arn="test-role-arn",
@@ -136,6 +151,82 @@ class TestJobAttachmentsSweeper:
 
         assert "Failed to get retention records" in str(err.value)
         assert error_message in str(err.value)
+
+    def test_get_attachments_to_delete_filter_with_datetime(self, processor: JobAttachmentsSweeper):
+        """Test when s3_keys_to_retain is empty - should return all objects modified after retention_datetime."""
+        mock_objects: List[S3ObjectData] = [
+            S3ObjectData(
+                key="delete_this", size=100, last_modified=datetime(2025, 1, 1), etag="etag1"
+            ),
+            S3ObjectData(
+                key="retain_this", size=200, last_modified=datetime(2025, 1, 3), etag="etag2"
+            ),
+        ]
+        processor.job_attachments_s3_bucket_lister.list_job_attachments.return_value = mock_objects
+
+        retention_datetime: datetime = datetime(2025, 1, 2)
+        result: List[str] = processor.get_attachments_to_delete(
+            s3_keys_to_retain=[],  # calling with empty list
+            retention_datetime=retention_datetime,
+            root_prefix="test/",
+        )
+
+        assert result == ["delete_this"]
+        processor.job_attachments_s3_bucket_lister.list_job_attachments.assert_called_once_with(
+            prefix="test/"
+        )
+
+    def test_get_attachments_to_delete_object_filter_with_retain_set(
+        self, processor: JobAttachmentsSweeper
+    ):
+        """Test when object key is in s3_keys_to_retain - should not be included in delete list."""
+        mock_objects: List[S3ObjectData] = [
+            S3ObjectData(
+                key="delete_this", size=200, last_modified=datetime(2025, 1, 1), etag="etag2"
+            ),
+            S3ObjectData(
+                key="retain_this", size=100, last_modified=datetime(2025, 1, 1), etag="etag1"
+            ),
+        ]
+        processor.job_attachments_s3_bucket_lister.list_job_attachments.return_value = mock_objects
+
+        retention_datetime: datetime = datetime(2025, 1, 2)
+        result: List[str] = processor.get_attachments_to_delete(
+            s3_keys_to_retain=["retain_this"],
+            retention_datetime=retention_datetime,
+            root_prefix="test/",
+        )
+
+        assert result == ["delete_this"]
+        processor.job_attachments_s3_bucket_lister.list_job_attachments.assert_called_once_with(
+            prefix="test/"
+        )
+
+    def test_get_attachments_to_delete_handles_lister_error(self, processor: JobAttachmentsSweeper):
+        """Test that the function properly handles errors from the lister."""
+        error_message: str = "Error with listing function"
+        processor.job_attachments_s3_bucket_lister.list_job_attachments.side_effect = (
+            JobAttachmentsS3BucketListerError(error_message)
+        )
+
+        retention_datetime: datetime = datetime(2025, 1, 2)
+
+        with pytest.raises(JobAttachmentsSweeperError) as err:
+            processor.get_attachments_to_delete(
+                s3_keys_to_retain=["key1"],
+                retention_datetime=retention_datetime,
+                root_prefix="test/",
+            )
+
+        assert "Failed to list objects for deletion" in str(err.value)
+        assert error_message in str(err.value)
+
+        processor.job_attachments_s3_bucket_lister.list_job_attachments.assert_called_once_with(
+            prefix="test/"
+        )
+
+        # Verify that the original error is preserved in the exception chain
+        assert isinstance(err.value.__cause__, JobAttachmentsS3BucketListerError)
 
     def test_create_tag_manifest_empty_list(self, processor: JobAttachmentsSweeper, test_dir: Path):
         """Test creating a tag manifest with an empty delete list."""
