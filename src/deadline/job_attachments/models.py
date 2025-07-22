@@ -522,3 +522,18 @@ class S3ObjectData(NamedTuple):
     size: int
     last_modified: datetime
     etag: str
+
+
+class FarmQueuePair(NamedTuple):
+    """Represents a farm_id and queue_id pair"""
+
+    farm_id: str
+    queue_id: str
+
+
+class FarmQueueJobTriple(NamedTuple):
+    """Represents a farm_id, queue_id, job_id triple"""
+
+    farm_id: str
+    queue_id: str
+    job_id: str

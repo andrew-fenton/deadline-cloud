@@ -13,6 +13,7 @@ from ..exceptions import (
     JobAttachmentS3BotoCoreError,
     RetentionRecordHandlerError,
 )
+from ..models import FarmQueuePair, FarmQueueJobTriple
 from ..job_attachments_s3_bucket_lister import JobAttachmentsS3BucketLister
 
 from deadline.job_attachments.models import RetentionRecord
@@ -31,10 +32,10 @@ class JobAttachmentsSweeper:
         deadline_client: BaseClient,
         retention_record_handler: RetentionRecordHandlerInterface,
         job_attachments_s3_bucket_lister: JobAttachmentsS3BucketLister,
-        farm_id: str,
         account_id: str,
         role_arn: str,
         bucket_name: str,
+        root_prefix: str,
     ):
         """
         Initializes the JobAttachmentsSweeper.
@@ -49,7 +50,6 @@ class JobAttachmentsSweeper:
             s3_control_client: AWS S3 Control client for batch operations
             deadline_client: Client for interacting with Deadline
             job_attachments_s3_bucket_lister: Component to list job attachments from an S3 bucket
-            farm_id (str): The target farm_id to cleanup
             account_id (str): AWS account ID for the batch operation
             role_arn (str): The ARN of the IAM role for executing batch jobs.
                 Required permissions:
@@ -57,16 +57,119 @@ class JobAttachmentsSweeper:
                     - s3:PutObjectTagging
                     - s3:CreateJob
             bucket_name (str): target S3 bucket to cleanup
+            root_prefix (str): S3 job attachments root prefix to cleanup
         """
         self.s3 = s3_client
         self.s3_control = s3_control_client
         self.deadline = deadline_client
         self.retention_record_handler = retention_record_handler
         self.job_attachments_s3_bucket_lister = job_attachments_s3_bucket_lister
-        self.farm_id = farm_id
         self.account_id = account_id
         self.role_arn = role_arn
         self.bucket_name = bucket_name
+        self.root_prefix = root_prefix
+
+    def get_queue_farm_pairs_from_s3(self) -> List[FarmQueuePair]:
+        """
+        Retrieves farms and their queues from S3 bucket as a list of FarmQueuePairs.
+
+        Returns:
+            List[FarmQueuePair]: A list of FarmQueuePair named tuples.
+            Example:
+                [
+                    FarmQueuePair(farm_id='farm-123', queue_id='queue-1'),
+                    FarmQueuePair(farm_id='farm-123', queue_id='queue-2'),
+                    FarmQueuePair(farm_id='farm-456', queue_id='queue-3')
+                ]
+        """
+        farm_queue_pairs: List[FarmQueuePair] = []
+
+        base_prefix: str = f"{self.root_prefix}/Manifests"
+
+        farms_prefix: str = f"{base_prefix}/farm"
+        farm_ids: List[str] = self._get_ids_from_common_prefixes(prefix=farms_prefix)
+
+        for farm_id in farm_ids:
+            queues_prefix: str = f"{base_prefix}/{farm_id}/queue"
+            queue_ids: List[str] = self._get_ids_from_common_prefixes(prefix=queues_prefix)
+
+            farm_queue_pairs.extend(FarmQueuePair(farm_id, queue_id) for queue_id in queue_ids)
+
+        return farm_queue_pairs
+
+    def get_farm_queue_job_triples_from_s3(
+        self, farm_queue_pairs: List[FarmQueuePair]
+    ) -> List[FarmQueueJobTriple]:
+        """
+        Retrieves jobs for given FarmQueuePairs from S3 bucket.
+
+        Args:
+            farm_queue_pairs (List[FarmQueuePair]): List of FarmQueuePair named tuples to get jobs for
+
+        Returns:
+            List[FarmQueueJobTriple]: A list of FarmQueueJobTriple named tuples.
+            Example:
+                [
+                    FarmQueueJobTriple(farm_id='farm-123', queue_id='queue-1', job_id='job-1'),
+                    FarmQueueJobTriple(farm_id='farm-123', queue_id='queue-1', job_id='job-2'),
+                    FarmQueueJobTriple(farm_id='farm-456', queue_id='queue-3', job_id='job-4')
+                ]
+        """
+        base_prefix: str = f"{self.root_prefix}/Manifests"
+        farm_queue_job_triples: List[FarmQueueJobTriple] = []
+
+        for farm_id, queue_id in farm_queue_pairs:
+            jobs_prefix: str = f"{base_prefix}/{farm_id}/{queue_id}/job"
+            job_ids: List[str] = self._get_ids_from_common_prefixes(prefix=jobs_prefix)
+
+            farm_queue_job_triples.extend(
+                FarmQueueJobTriple(farm_id, queue_id, job_id) for job_id in job_ids
+            )
+
+        return farm_queue_job_triples
+
+    def _get_ids_from_common_prefixes(self, prefix: str) -> List[str]:
+        """
+        Extracts IDs from S3 common prefixes based on a given prefix path.
+
+        Args:
+            prefix (str): The S3 prefix path to search for IDs.
+
+        Returns:
+            List[str]: A list of extracted IDs from the common prefixes.
+
+        Raises:
+            JobAttachmentsSweeperError: If there is an error listing common prefixes
+                from the S3 bucket.
+
+        Notes:
+            - Assumes IDs are located in the second-to-last position when splitting
+            the prefix path by '/'.
+            - Skips prefixes that don't have at least 2 parts when split.
+        """
+        ids: List[str] = []
+
+        try:
+            for (
+                common_prefix_data
+            ) in self.job_attachments_s3_bucket_lister.list_common_prefixes_with_delimeter(
+                prefix=prefix
+            ):
+                common_prefix: str = common_prefix_data.get("Prefix", "")
+                split_common_prefix: List[str] = common_prefix.split("/")
+
+                if len(split_common_prefix) < 2:
+                    continue
+
+                # Prefix ends with  "/", last element will be an empty string
+                id: str = split_common_prefix[-2]
+                ids.append(id)
+        except JobAttachmentsS3BucketListerError as err:
+            raise JobAttachmentsSweeperError(
+                message=f"Failed to list common prefixes: {str(err)}"
+            ) from err
+
+        return ids
 
     def get_attachments_to_retain(self, queue_job_id_map: Dict[str, List[str]]) -> Set[str]:
         """
