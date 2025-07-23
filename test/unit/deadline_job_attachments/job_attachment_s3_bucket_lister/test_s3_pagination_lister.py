@@ -256,7 +256,6 @@ class TestS3PaginationLister:
 
         assert len(results) == 0
 
-
     def test_list_job_attachments_with_prefixes_happy_path(
         self,
         mock_session: Mock,
@@ -325,4 +324,3 @@ class TestS3PaginationLister:
         lister.list_job_attachments.assert_any_call(prefix="DeadlineCloud/prefix1/")
         lister.list_job_attachments.assert_any_call(prefix="DeadlineCloud/prefix2/")
         lister.list_job_attachments.assert_any_call(prefix="DeadlineCloud/prefix3/")
-

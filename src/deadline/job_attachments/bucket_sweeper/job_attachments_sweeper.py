@@ -13,7 +13,6 @@ from ..exceptions import (
     JobAttachmentS3BotoCoreError,
     RetentionRecordHandlerError,
 )
-from ..models import FarmQueuePair, FarmQueueJobTriple
 from ..job_attachments_s3_bucket_lister import JobAttachmentsS3BucketLister
 
 from deadline.job_attachments.models import RetentionRecord
@@ -69,20 +68,19 @@ class JobAttachmentsSweeper:
         self.bucket_name = bucket_name
         self.root_prefix = root_prefix
 
-    def get_queue_farm_pairs_from_s3(self) -> List[FarmQueuePair]:
+    def get_queues_in_farms_from_s3(self) -> Dict[str, List[str]]:
         """
-        Retrieves farms and their queues from S3 bucket as a list of FarmQueuePairs.
+        Retrieves farms and their queues from S3 bucket as a dictionary mapping farm_id to queue_ids.
 
         Returns:
-            List[FarmQueuePair]: A list of FarmQueuePair named tuples.
+            Dict[str, List[str]]: A dictionary mapping farm_id to a list of queue_ids.
             Example:
-                [
-                    FarmQueuePair(farm_id='farm-123', queue_id='queue-1'),
-                    FarmQueuePair(farm_id='farm-123', queue_id='queue-2'),
-                    FarmQueuePair(farm_id='farm-456', queue_id='queue-3')
-                ]
+                {
+                    'farm-123': ['queue-1', 'queue-2'],
+                    'farm-456': ['queue-3']
+                }
         """
-        farm_queue_pairs: List[FarmQueuePair] = []
+        farm_queues_map: Dict[str, List[str]] = {}
 
         base_prefix: str = f"{self.root_prefix}/Manifests"
 
@@ -93,40 +91,10 @@ class JobAttachmentsSweeper:
             queues_prefix: str = f"{base_prefix}/{farm_id}/queue"
             queue_ids: List[str] = self._get_ids_from_common_prefixes(prefix=queues_prefix)
 
-            farm_queue_pairs.extend(FarmQueuePair(farm_id, queue_id) for queue_id in queue_ids)
+            if queue_ids:
+                farm_queues_map[farm_id] = queue_ids
 
-        return farm_queue_pairs
-
-    def get_farm_queue_job_triples_from_s3(
-        self, farm_queue_pairs: List[FarmQueuePair]
-    ) -> List[FarmQueueJobTriple]:
-        """
-        Retrieves jobs for given FarmQueuePairs from S3 bucket.
-
-        Args:
-            farm_queue_pairs (List[FarmQueuePair]): List of FarmQueuePair named tuples to get jobs for
-
-        Returns:
-            List[FarmQueueJobTriple]: A list of FarmQueueJobTriple named tuples.
-            Example:
-                [
-                    FarmQueueJobTriple(farm_id='farm-123', queue_id='queue-1', job_id='job-1'),
-                    FarmQueueJobTriple(farm_id='farm-123', queue_id='queue-1', job_id='job-2'),
-                    FarmQueueJobTriple(farm_id='farm-456', queue_id='queue-3', job_id='job-4')
-                ]
-        """
-        base_prefix: str = f"{self.root_prefix}/Manifests"
-        farm_queue_job_triples: List[FarmQueueJobTriple] = []
-
-        for farm_id, queue_id in farm_queue_pairs:
-            jobs_prefix: str = f"{base_prefix}/{farm_id}/{queue_id}/job"
-            job_ids: List[str] = self._get_ids_from_common_prefixes(prefix=jobs_prefix)
-
-            farm_queue_job_triples.extend(
-                FarmQueueJobTriple(farm_id, queue_id, job_id) for job_id in job_ids
-            )
-
-        return farm_queue_job_triples
+        return farm_queues_map
 
     def _get_ids_from_common_prefixes(self, prefix: str) -> List[str]:
         """

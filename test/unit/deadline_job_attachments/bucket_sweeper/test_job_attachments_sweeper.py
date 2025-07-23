@@ -10,7 +10,10 @@ from pathlib import Path
 from botocore.exceptions import BotoCoreError
 from unittest.mock import Mock
 
-from deadline.job_attachments.models import RetentionRecord, FarmQueueJobTriple, FarmQueuePair, S3ObjectData
+from deadline.job_attachments.models import (
+    RetentionRecord,
+    S3ObjectData,
+)
 from deadline.job_attachments.bucket_sweeper.job_attachments_sweeper import JobAttachmentsSweeper
 from deadline.job_attachments.exceptions import (
     JobAttachmentsS3BucketListerError,
@@ -151,9 +154,10 @@ class TestJobAttachmentsSweeper:
 
         assert "Failed to get retention records" in str(err.value)
         assert error_message in str(err.value)
-    def test_get_queue_farm_pairs_from_s3_happy_path(self, processor: JobAttachmentsSweeper):
-        """Test successfully retrieving 3 FarmQueuePairs."""
-        mock_get_ids = Mock()
+
+    def test_get_queues_in_farms_from_s3_happy_path(self, processor: JobAttachmentsSweeper):
+        """Test successfully retrieving queues for multiple farms."""
+        mock_get_ids: Mock = Mock()
         mock_get_ids.side_effect = [
             ["farm-123", "farm-456"],  # First call for farm IDs
             ["queue-1", "queue-2"],  # Second call for farm-123 queues
@@ -162,18 +166,17 @@ class TestJobAttachmentsSweeper:
 
         processor._get_ids_from_common_prefixes = mock_get_ids
 
-        result = processor.get_queue_farm_pairs_from_s3()
+        result: Dict[str, List[str]] = processor.get_queues_in_farms_from_s3()
 
-        expected = [
-            FarmQueuePair(farm_id="farm-123", queue_id="queue-1"),
-            FarmQueuePair(farm_id="farm-123", queue_id="queue-2"),
-            FarmQueuePair(farm_id="farm-456", queue_id="queue-3"),
-        ]
+        expected: Dict[str, List[str]] = {
+            "farm-123": ["queue-1", "queue-2"],
+            "farm-456": ["queue-3"],
+        }
 
-        assert len(result) == 3
+        assert len(result) == 2
         assert result == expected
 
-    def test_get_queue_farm_pairs_from_s3_no_queues(self, processor: JobAttachmentsSweeper):
+    def test_get_queues_in_farms_from_s3_no_queues(self, processor: JobAttachmentsSweeper):
         """Test when there are no queue_ids returned by _get_ids_from_common_prefixes."""
         mock_get_ids: Mock = Mock()
         mock_get_ids.side_effect = [
@@ -184,77 +187,10 @@ class TestJobAttachmentsSweeper:
 
         processor._get_ids_from_common_prefixes = mock_get_ids
 
-        result: List[FarmQueuePair] = processor.get_queue_farm_pairs_from_s3()
+        result: Dict[str, List[str]] = processor.get_queues_in_farms_from_s3()
 
         assert len(result) == 0
-        assert result == []
-
-    def test_get_farm_queue_job_triples_from_s3_happy_path(self, processor: JobAttachmentsSweeper):
-        """Test successfully retrieving FarmQueueJobTriples."""
-        mock_get_ids: Mock = Mock()
-        mock_get_ids.side_effect = [
-            ["job-1", "job-2"],  # Jobs for farm-123/queue-1
-            ["job-3"],  # Jobs for farm-123/queue-2
-            ["job-4", "job-5"],  # Jobs for farm-456/queue-3
-        ]
-
-        processor._get_ids_from_common_prefixes = mock_get_ids
-
-        farm_queue_pairs: List[FarmQueuePair] = [
-            FarmQueuePair(farm_id="farm-123", queue_id="queue-1"),
-            FarmQueuePair(farm_id="farm-123", queue_id="queue-2"),
-            FarmQueuePair(farm_id="farm-456", queue_id="queue-3"),
-        ]
-
-        result: List[FarmQueueJobTriple] = processor.get_farm_queue_job_triples_from_s3(
-            farm_queue_pairs
-        )
-
-        expected: List[FarmQueueJobTriple] = [
-            FarmQueueJobTriple(farm_id="farm-123", queue_id="queue-1", job_id="job-1"),
-            FarmQueueJobTriple(farm_id="farm-123", queue_id="queue-1", job_id="job-2"),
-            FarmQueueJobTriple(farm_id="farm-123", queue_id="queue-2", job_id="job-3"),
-            FarmQueueJobTriple(farm_id="farm-456", queue_id="queue-3", job_id="job-4"),
-            FarmQueueJobTriple(farm_id="farm-456", queue_id="queue-3", job_id="job-5"),
-        ]
-
-        assert len(result) == 5
-        assert result == expected
-
-    def test_get_farm_queue_job_triples_from_s3_no_jobs(self, processor: JobAttachmentsSweeper):
-        """Test when there are no jobs returned by _get_ids_from_common_prefixes."""
-        mock_get_ids: Mock = Mock()
-        mock_get_ids.side_effect = [
-            [],  # No jobs for farm-123/queue-1
-            [],  # No jobs for farm-123/queue-2
-            [],  # No jobs for farm-456/queue-3
-        ]
-
-        processor._get_ids_from_common_prefixes = mock_get_ids
-
-        farm_queue_pairs: List[FarmQueuePair] = [
-            FarmQueuePair(farm_id="farm-123", queue_id="queue-1"),
-            FarmQueuePair(farm_id="farm-123", queue_id="queue-2"),
-            FarmQueuePair(farm_id="farm-456", queue_id="queue-3"),
-        ]
-
-        result: List[FarmQueueJobTriple] = processor.get_farm_queue_job_triples_from_s3(
-            farm_queue_pairs
-        )
-
-        assert len(result) == 0
-        assert result == []
-
-    def test_get_farm_queue_job_triples_from_s3_empty_input(self, processor: JobAttachmentsSweeper):
-        """Test when an empty list of farm_queue_pairs is provided."""
-        mock_get_ids: Mock = Mock()
-        processor._get_ids_from_common_prefixes = mock_get_ids
-
-        result: List[FarmQueueJobTriple] = processor.get_farm_queue_job_triples_from_s3([])
-
-        assert len(result) == 0
-        assert result == []
-        mock_get_ids.assert_not_called()
+        assert result == {}
 
     def test_get_ids_from_common_prefixes_happy_path(self, processor: JobAttachmentsSweeper):
         """Test successfully getting IDs from common prefixes."""

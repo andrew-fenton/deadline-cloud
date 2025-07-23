@@ -524,13 +524,6 @@ class S3ObjectData(NamedTuple):
     etag: str
 
 
-class FarmQueuePair(NamedTuple):
-    """Represents a farm_id and queue_id pair"""
-
-    farm_id: str
-    queue_id: str
-
-
 class FarmQueueJobTriple(NamedTuple):
     """Represents a farm_id, queue_id, job_id triple"""
 
