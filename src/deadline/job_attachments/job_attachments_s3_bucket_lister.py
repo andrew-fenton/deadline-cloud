@@ -19,6 +19,31 @@ class JobAttachmentsS3BucketLister(ABC):
     """Interface for listing job attachments from S3."""
 
     @abstractmethod
+    def list_common_prefixes_with_delimeter(self, prefix: str) -> Iterator[str]:
+        """
+        Lists all common prefixes within the given S3 prefix.
+
+        For example, if your S3 structure is:
+        queue-1/job-1/...
+        queue-1/job-1/...
+        queue-1/job-2/...
+
+        Then calling with prefix="queue-1/" will yield:
+        - queue-1/job-1/
+        - queue-1/job-2/
+
+        Args:
+            prefix (str): The S3 prefix to list from
+
+        Returns:
+            Iterator[str]: Stream of common prefixes found
+
+        Raises:
+            JobAttachmentsS3BucketListerError: If S3 listing fails
+        """
+        raise NotImplementedError()
+
+    @abstractmethod
     def list_job_attachments(self, prefix: str) -> Iterator[S3ObjectData]:
         """
         Lists S3 objects under the given prefix.
@@ -64,6 +89,42 @@ class S3PaginationLister(JobAttachmentsS3BucketLister):
         """
         self.boto3_session = boto3_session
         self.settings = settings
+
+    def list_common_prefixes_with_delimeter(self, prefix: str) -> Iterator[str]:
+        """
+        Lists all common prefixes within the given S3 prefix.
+
+        For example, if your S3 structure is:
+        queue-1/job-1/...
+        queue-1/job-1/...
+        queue-1/job-2/...
+
+        Then calling with prefix="queue-1/" will yield:
+        - queue-1/job-1/
+        - queue-1/job-2/
+
+        Args:
+            prefix (str): The S3 prefix to list from
+
+        Returns:
+            Iterator[str]: Stream of common prefixes found
+
+        Raises:
+            JobAttachmentsS3BucketListerError: If S3 listing fails
+        """
+        s3: BaseClient = get_s3_client(session=self.boto3_session)
+        paginator: Paginator = s3.get_paginator("list_objects_v2")
+
+        try:
+            for page in paginator.paginate(
+                Bucket=self.settings.s3BucketName, Prefix=prefix, Delimiter="/"
+            ):
+                for object in page.get("CommonPrefixes", []):
+                    yield object
+        except ClientError as err:
+            raise JobAttachmentsS3BucketListerError(
+                f"Failed to list job attachments from S3: {str(err)}"
+            ) from err
 
     def list_job_attachments(
         self,
@@ -131,6 +192,21 @@ class S3InventoryLister(JobAttachmentsS3BucketLister):
         https://docs.aws.amazon.com/AmazonS3/latest/userguide/storage-inventory.html
 
     """
+
+    def list_common_prefixes_with_delimeter(self, prefix) -> Iterator[str]:
+        """
+        Lists all common prefixes within the given S3 prefix from an S3 Inventory manifest.
+
+        Args:
+            prefix (str): The S3 prefix to list from
+
+        Returns:
+            Iterator[str]: Stream of common prefixes found
+
+        Raises:
+            JobAttachmentsS3BucketListerError: If S3 listing fails
+        """
+        return super().list_common_prefixes_with_delimeter(prefix)
 
     def list_job_attachments(self, prefix: str) -> Iterator[S3ObjectData]:
         """

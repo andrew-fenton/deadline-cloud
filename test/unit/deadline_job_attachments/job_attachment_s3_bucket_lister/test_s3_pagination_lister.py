@@ -34,6 +34,66 @@ class TestS3PaginationLister:
         client.get_paginator.return_value = mock_paginator
         return client
 
+    def test_list_common_prefixes_with_delimeter_happy_path(
+        self,
+        mock_session: Mock,
+        settings: JobAttachmentS3Settings,
+        mock_s3_client: Mock,
+        mock_paginator: Mock,
+    ):
+        """Test listing common prefixes with successful response"""
+        mock_session.client.return_value = mock_s3_client
+
+        mock_paginator.paginate.return_value = [
+            {
+                "CommonPrefixes": [
+                    {"Prefix": "queue-1/job-1/"},
+                    {"Prefix": "queue-1/job-2/"},
+                    {"Prefix": "queue-1/job-3/"},
+                ]
+            }
+        ]
+
+        lister: S3PaginationLister = S3PaginationLister(mock_session, settings)
+        results = list(lister.list_common_prefixes_with_delimeter("queue-1/"))
+
+        assert len(results) == 3
+        assert results == [
+            {"Prefix": "queue-1/job-1/"},
+            {"Prefix": "queue-1/job-2/"},
+            {"Prefix": "queue-1/job-3/"},
+        ]
+
+        mock_paginator.paginate.assert_called_once_with(
+            Bucket="test-bucket", Prefix="queue-1/", Delimiter="/"
+        )
+
+    def test_list_common_prefixes_with_delimeter_client_error(
+        self,
+        mock_session: Mock,
+        settings: JobAttachmentS3Settings,
+        mock_s3_client: Mock,
+        mock_paginator: Mock,
+    ):
+        """Test handling of ClientError when listing common prefixes"""
+        mock_session.client.return_value = mock_s3_client
+
+        mock_paginator.paginate.side_effect = ClientError(
+            error_response={"Error": {"Code": "IOError", "Message": "Failed to read from S3"}},
+            operation_name="ListObjectsV2",
+        )
+
+        lister: S3PaginationLister = S3PaginationLister(mock_session, settings)
+
+        with pytest.raises(JobAttachmentsS3BucketListerError) as err:
+            list(lister.list_common_prefixes_with_delimeter("queue-1/"))
+
+        assert "Failed to list job attachments from S3" in str(err.value)
+
+        mock_paginator.paginate.assert_called_once_with(
+            Bucket="test-bucket", Prefix="queue-1/", Delimiter="/"
+        )
+
     def test_list_job_attachments_basic_listing(
         self,
         mock_session: Mock,

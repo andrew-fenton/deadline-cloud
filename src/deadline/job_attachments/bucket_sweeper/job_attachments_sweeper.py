@@ -31,10 +31,10 @@ class JobAttachmentsSweeper:
         deadline_client: BaseClient,
         retention_record_handler: RetentionRecordHandlerInterface,
         job_attachments_s3_bucket_lister: JobAttachmentsS3BucketLister,
-        farm_id: str,
         account_id: str,
         role_arn: str,
         bucket_name: str,
+        root_prefix: str,
     ):
         """
         Initializes the JobAttachmentsSweeper.
@@ -49,7 +49,6 @@ class JobAttachmentsSweeper:
             s3_control_client: AWS S3 Control client for batch operations
             deadline_client: Client for interacting with Deadline
             job_attachments_s3_bucket_lister: Component to list job attachments from an S3 bucket
-            farm_id (str): The target farm_id to cleanup
             account_id (str): AWS account ID for the batch operation
             role_arn (str): The ARN of the IAM role for executing batch jobs.
                 Required permissions:
@@ -57,16 +56,88 @@ class JobAttachmentsSweeper:
                     - s3:PutObjectTagging
                     - s3:CreateJob
             bucket_name (str): target S3 bucket to cleanup
+            root_prefix (str): S3 job attachments root prefix to cleanup
         """
         self.s3 = s3_client
         self.s3_control = s3_control_client
         self.deadline = deadline_client
         self.retention_record_handler = retention_record_handler
         self.job_attachments_s3_bucket_lister = job_attachments_s3_bucket_lister
-        self.farm_id = farm_id
         self.account_id = account_id
         self.role_arn = role_arn
         self.bucket_name = bucket_name
+        self.root_prefix = root_prefix
+
+    def get_queues_in_farms_from_s3(self) -> Dict[str, List[str]]:
+        """
+        Retrieves farms and their queues from S3 bucket as a dictionary mapping farm_id to queue_ids.
+
+        Returns:
+            Dict[str, List[str]]: A dictionary mapping farm_id to a list of queue_ids.
+            Example:
+                {
+                    'farm-123': ['queue-1', 'queue-2'],
+                    'farm-456': ['queue-3']
+                }
+        """
+        farm_queues_map: Dict[str, List[str]] = {}
+
+        base_prefix: str = f"{self.root_prefix}/Manifests"
+
+        farms_prefix: str = f"{base_prefix}/farm"
+        farm_ids: List[str] = self._get_ids_from_common_prefixes(prefix=farms_prefix)
+
+        for farm_id in farm_ids:
+            queues_prefix: str = f"{base_prefix}/{farm_id}/queue"
+            queue_ids: List[str] = self._get_ids_from_common_prefixes(prefix=queues_prefix)
+
+            if queue_ids:
+                farm_queues_map[farm_id] = queue_ids
+
+        return farm_queues_map
+
+    def _get_ids_from_common_prefixes(self, prefix: str) -> List[str]:
+        """
+        Extracts IDs from S3 common prefixes based on a given prefix path.
+
+        Args:
+            prefix (str): The S3 prefix path to search for IDs.
+
+        Returns:
+            List[str]: A list of extracted IDs from the common prefixes.
+
+        Raises:
+            JobAttachmentsSweeperError: If there is an error listing common prefixes
+                from the S3 bucket.
+
+        Notes:
+            - Assumes IDs are located in the second-to-last position when splitting
+            the prefix path by '/'.
+            - Skips prefixes that don't have at least 2 parts when split.
+        """
+        ids: List[str] = []
+
+        try:
+            for (
+                common_prefix_data
+            ) in self.job_attachments_s3_bucket_lister.list_common_prefixes_with_delimeter(
+                prefix=prefix
+            ):
+                common_prefix: str = common_prefix_data.get("Prefix", "")
+                split_common_prefix: List[str] = common_prefix.split("/")
+
+                if len(split_common_prefix) < 2:
+                    continue
+
+                # Prefix ends with  "/", last element will be an empty string
+                id: str = split_common_prefix[-2]
+                ids.append(id)
+        except JobAttachmentsS3BucketListerError as err:
+            raise JobAttachmentsSweeperError(
+                message=f"Failed to list common prefixes: {str(err)}"
+            ) from err
+
+        return ids
 
     def get_attachments_to_retain(self, queue_job_id_map: Dict[str, List[str]]) -> Set[str]:
         """
