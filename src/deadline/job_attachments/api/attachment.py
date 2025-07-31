@@ -4,9 +4,10 @@ import os
 import boto3
 import json
 
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Callable
 from pathlib import Path
 from dataclasses import asdict
+from datetime import datetime, timezone, timedelta
 
 from deadline.job_attachments.api._utils import _read_manifests
 from deadline.job_attachments.asset_manifests.base_manifest import BaseAssetManifest
@@ -17,6 +18,17 @@ from deadline.job_attachments.models import (
     UploadManifestInfo,
     PathMappingRule,
 )
+from deadline.job_attachments.bucket_sweeper.bucket_sweeper_components import (
+    _initialize_dependencies,
+    _collect_farm_queue_job_triples,
+    _process_manifests_and_create_retention_records,
+    _determine_objects_to_delete,
+    _create_deletion_batch_job,
+    SweeperDependencies,
+)
+from deadline.job_attachments.bucket_sweeper.job_attachments_sweeper import JobAttachmentsSweeper
+from deadline.job_attachments.bucket_sweeper.retention_record_handler import RetentionRecordHandler
+from deadline.job_attachments.models import FarmQueueJobTriple
 from deadline.job_attachments.progress_tracker import DownloadSummaryStatistics
 from deadline.job_attachments.upload import S3AssetUploader
 from deadline.client.cli._groups.click_logger import ClickLogger
@@ -275,3 +287,116 @@ def _process_path_mapping(
     )
 
     return path_mapping_rule_list
+
+
+def _attachment_sweep(
+    bucket_name: str,
+    root_prefix: str,
+    boto3_session: boto3.Session,
+    s3_batch_job_arn_role: str,
+    retention_days: int = 120,
+    dry_run: bool = False,
+    logging_function_callback: Callable[[str], None] = lambda msg: None,
+) -> None:
+    """
+    Orchestrates the cleanup of job attachments in an S3 bucket based on job last run dates.
+
+    This method performs a cleanup process that:
+        1. Identifies active jobs and their associated attachments
+        2. Creates retention records for files that should be preserved
+        3. Determines which files can be safely deleted based on age and usage
+        4. Generates a batch job manifest for S3 deletion operations
+
+    Args:
+        bucket_name: Name of the S3 bucket containing job attachments
+        root_prefix: S3 prefix path where job attachments are stored
+        boto3_session: authenticated boto3 session
+        s3_batch_job_arn_role: arn role for S3 batch tagging operation
+        retention_days: Number of days to retain files. Files last used before
+                    (today - retention_days) will be deleted. Must be between 0 and 120.
+                    Defaults to 120.
+        dry_run: flag to create S3 batch operations job
+        logging_function_callback: signature for logging function
+
+    Retention Logic:
+        Files are retained based on date-level comparison:
+        - Files last used on or after the retention date (today - retention_days) are kept
+        - Files last used before the retention date are deleted
+        - Timestamps are truncated to midnight UTC, so only calendar dates matter
+
+    Note:
+        All date comparisons use UTC timezone to match S3 and Deadline API responses.
+    """
+    if not all([bucket_name, root_prefix, boto3_session, s3_batch_job_arn_role, retention_days]):
+        raise NonValidInputError(
+            "Missing parameters: bucket-name, root-prefix, and retention-days, boto3_session, and s3_batch_job_arn_role parameters are required"
+        )
+
+    if retention_days < 0 or retention_days > 120:
+        raise NonValidInputError("retention_days must be within 0 and 120 days")
+
+    working_directory: Path = Path("/tmp") / "bucket_sweeper"
+    working_directory.mkdir(exist_ok=True)
+
+    logging_function_callback(
+        f"Starting bucket sweep for bucket and root prefix: {bucket_name}/{root_prefix}"
+    )
+
+    # All comparisons done in UTC - dates returned by S3 and Deadline APIs are in UTC
+    today: datetime = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    retention_datetime: datetime = today - timedelta(days=retention_days)
+
+    logging_function_callback(f"Retaining all files last used on or after: {retention_datetime}")
+
+    # Initialize services
+    components: SweeperDependencies = _initialize_dependencies(
+        working_directory=working_directory,
+        bucket_name=bucket_name,
+        root_prefix=root_prefix,
+        boto3_session=boto3_session,
+        role_arn=s3_batch_job_arn_role,
+    )
+    sweeper: JobAttachmentsSweeper = components.sweeper
+    job_attachment_s3_settings: JobAttachmentS3Settings = components.job_attachment_s3_settings
+    retention_record_handler: RetentionRecordHandler = components.retention_record_handler
+
+    # Get farms, queues, jobs, and convert into triples
+    farm_queue_job_triples: List[FarmQueueJobTriple] = _collect_farm_queue_job_triples(
+        sweeper=sweeper, boto3_session=boto3_session, retention_datetime=retention_datetime
+    )
+
+    logging_function_callback(f"Found {len(farm_queue_job_triples)} active jobs.")
+
+    # Download manifests, extract asset hashes, and create retention records
+    _process_manifests_and_create_retention_records(
+        farm_queue_job_triples=farm_queue_job_triples,
+        boto3_session=boto3_session,
+        job_attachment_s3_settings=job_attachment_s3_settings,
+        working_directory=working_directory,
+        retention_record_handler=retention_record_handler,
+    )
+
+    # Compare retention set to s3 bucket to create a delete list
+    delete_list: List[str] = _determine_objects_to_delete(
+        farm_queue_job_triples=farm_queue_job_triples,
+        sweeper=sweeper,
+        retention_datetime=retention_datetime,
+        root_prefix=root_prefix,
+    )
+
+    logging_function_callback(f"Found {len(delete_list)} files to delete.")
+
+    _create_deletion_batch_job(
+        delete_list=delete_list,
+        sweeper=sweeper,
+        working_directory=working_directory,
+        root_prefix=root_prefix,
+        dry_run=dry_run,
+    )
+
+    if not dry_run:
+        logging_function_callback("Created S3 batch job to handle deletion.")
+    else:
+        logging_function_callback("Dry run: Delete manifest created but objects not deleted.")
+
+    logging_function_callback("Completed bucket sweep.")

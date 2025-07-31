@@ -4,6 +4,7 @@
 All the `deadline attachment` commands:
     * upload
     * download
+    * cleanup
 """
 
 from __future__ import annotations
@@ -211,4 +212,67 @@ def attachment_upload(
         path_mapping_rules=path_mapping_rules,
         upload_manifest_path=upload_manifest_path,
         logger=logger,
+    )
+
+
+@cli_attachment.command(
+    name="cleanup",
+    help="BETA - Cleanup all unused files in a job attachments S3 bucket.",
+)
+@click.option(
+    "--bucket-name",
+    help="Name of the S3 bucket where cleanup will be performed (e.g., 'my-attachment-bucket')",
+)
+@click.option(
+    "--root-prefix",
+    help="Base folder path within the S3 bucket to start cleanup from (e.g., 'DeadlineCloud')",
+)
+@click.option(
+    "--retention-days",
+    help="Number of days to keep files. Files accessed within this many days will be preserved, older unused files will be deleted (e.g., 30)",
+)
+@click.option(
+    "--role-arn",
+    required=False,
+    help="Role ARN for executing S3 batch operations tagging job",
+)
+@click.option(
+    "--dry-run",
+    default=False,
+    is_flag=True,
+    help="Creates a delete objects manifest but does not create a batch job.",
+)
+@click.option("--json", default=False, is_flag=True, help="Output is printed as JSON for scripting")
+@_handle_error
+def cleanup(
+    bucket_name: str,
+    root_prefix: str,
+    role_arn: str,
+    dry_run: bool,
+    json: bool,
+    retention_days: int = 120,
+    **args,
+):
+    """
+    Cleanup all unused files in a job attachments S3 bucket.
+    """
+    config = _apply_cli_options_to_config(**args)
+    logger: ClickLogger = ClickLogger(is_json=json)
+
+    retention_days: int = int(retention_days)
+    boto3_session: boto3.Session = api.get_boto3_session(config=config)
+
+    if not role_arn:
+        role_arn: str = config_file.get_setting("defaults.s3_batch_job_role_arn", config=config)
+    else:
+        config_file.set_setting("defaults.s3_batch_job_role_arn", role_arn, config=config)
+
+    attachment_api._attachment_sweep(
+        bucket_name=bucket_name,
+        root_prefix=root_prefix,
+        boto3_session=boto3_session,
+        s3_batch_job_arn_role=role_arn,
+        retention_days=retention_days,
+        dry_run=dry_run,
+        logging_function_callback=logger.echo,
     )

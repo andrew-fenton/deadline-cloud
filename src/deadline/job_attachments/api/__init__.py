@@ -3,6 +3,7 @@
 __all__ = [
     "attachment_download",
     "attachment_upload",
+    "_attachment_sweep",
     "summarize_paths_by_nested_directory",
     "summarize_paths_by_sequence",
     "human_readable_file_size",
@@ -10,7 +11,7 @@ __all__ = [
     "PathSummary",
 ]
 
-from .attachment import attachment_download, attachment_upload
+from .attachment import attachment_download, attachment_upload, _attachment_sweep
 from ...common.path_utils import (
     human_readable_file_size,
     summarize_paths_by_nested_directory,

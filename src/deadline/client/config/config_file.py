@@ -122,6 +122,10 @@ SETTINGS: Dict[str, Dict[str, Any]] = {
         "depend": "defaults.farm_id",
         "description": "The file system mode to use for job attachments when running jobs. COPIED means to download a copy of the attachment data, VIRTUAL means to use a virtual file system for lazy loading.",
     },
+    "defaults.s3_batch_job_role_arn": {
+        "default": "",
+        "description": "The role arn passed to the S3 batch job operations to tag job attachments for deletion. Used for the bucket sweeper.",
+    },
     "settings.s3_max_pool_connections": {
         "default": "50",
         "description": (

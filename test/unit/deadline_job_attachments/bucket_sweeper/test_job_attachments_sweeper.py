@@ -24,6 +24,12 @@ from deadline.job_attachments.exceptions import (
 
 
 @pytest.fixture
+def mock_boto3_session() -> Mock:
+    """Fixture to create mock Boto3 Session"""
+    return Mock()
+
+
+@pytest.fixture
 def mock_s3() -> Mock:
     """Fixture to create mock AWS S3 client"""
     return Mock()
@@ -55,6 +61,7 @@ def mock_lister() -> Mock:
 
 @pytest.fixture
 def processor(
+    mock_boto3_session: Mock,
     mock_s3: Mock,
     mock_s3_control: Mock,
     mock_deadline: Mock,
@@ -68,7 +75,7 @@ def processor(
         deadline_client=mock_deadline,
         retention_record_handler=mock_record_handler,
         job_attachments_s3_bucket_lister=mock_lister,
-        account_id="test-account-id",
+        boto3_session=mock_boto3_session,
         role_arn="test-role-arn",
         bucket_name="test-bucket",
         root_prefix="test-prefix",
@@ -416,14 +423,21 @@ class TestJobAttachmentsSweeper:
             processor._submit_tagging_batch_job({}, {})
 
     def test_create_batch_tag_s3_job(
-        self, processor: JobAttachmentsSweeper, mock_s3: Mock, mock_s3_control: Mock
+        self,
+        processor: JobAttachmentsSweeper,
+        mock_boto3_session: Mock,
+        mock_s3: Mock,
+        mock_s3_control: Mock,
     ):
         """Test creating S3 batch tagging job"""
         # Test data
         s3_manifest_key: str = "test/test.csv"
 
-        # Mock S3 head_object response
+        # Mock responses
         mock_s3.head_object.return_value = {"ETag": "test-etag"}
+        mock_boto3_session.client("sts").get_caller_identity.return_value = {
+            "Account": "test-account-id"
+        }
 
         # Call method
         processor._create_batch_tag_s3_job(s3_manifest_key)
