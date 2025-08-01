@@ -1,6 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 
 import csv
+import boto3
 
 from datetime import datetime
 from typing import List, Dict, Any, Set
@@ -31,7 +32,7 @@ class JobAttachmentsSweeper:
         deadline_client: BaseClient,
         retention_record_handler: RetentionRecordHandlerInterface,
         job_attachments_s3_bucket_lister: JobAttachmentsS3BucketLister,
-        account_id: str,
+        boto3_session: boto3.Session,
         role_arn: str,
         bucket_name: str,
         root_prefix: str,
@@ -49,7 +50,7 @@ class JobAttachmentsSweeper:
             s3_control_client: AWS S3 Control client for batch operations
             deadline_client: Client for interacting with Deadline
             job_attachments_s3_bucket_lister: Component to list job attachments from an S3 bucket
-            account_id (str): AWS account ID for the batch operation
+            boto3_session: boto3 session
             role_arn (str): The ARN of the IAM role for executing batch jobs.
                 Required permissions:
                     - s3:GetObject
@@ -63,7 +64,7 @@ class JobAttachmentsSweeper:
         self.deadline = deadline_client
         self.retention_record_handler = retention_record_handler
         self.job_attachments_s3_bucket_lister = job_attachments_s3_bucket_lister
-        self.account_id = account_id
+        self.boto3_session = boto3_session
         self.role_arn = role_arn
         self.bucket_name = bucket_name
         self.root_prefix = root_prefix
@@ -344,8 +345,10 @@ class JobAttachmentsSweeper:
             The CLI client requires s3:CreateJob and iam:PassRole permissions to create a batch tagging job.
         """
         try:
+            account_id: str = self.boto3_session.client("sts").get_caller_identity()["Account"]
+
             self.s3_control.create_job(
-                AccountId=self.account_id,
+                AccountId=account_id,
                 RoleArn=self.role_arn,
                 Operation=operation,
                 Manifest=manifest,

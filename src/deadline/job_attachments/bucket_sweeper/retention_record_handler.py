@@ -75,15 +75,13 @@ class RetentionRecordHandler(RetentionRecordHandlerInterface):
 
         Creates the storage file with an empty JSON object.
 
+        Note:
+            Overwrites any existing storage file.
+
         Raises:
-            RetentionRecordHandlerError: If storage file already exists or it cannot be created
+            RetentionRecordHandlerError: If storage file cannot be created
                 (e.g., due to permissions, disk space, or invalid path).
         """
-        if self.storage_file_path.exists():
-            raise RetentionRecordHandlerError(
-                "Failed to initialize handler, storage file already exists"
-            )
-
         try:
             content: QueueJobKeyMapping = {"queues": {}}
             self.storage_file_path.write_text(json.dumps(content))

@@ -33,15 +33,12 @@ class TestRetentionRecordHandler:
             assert json.load(file) == {"queues": {}}
 
     def test_initialize_storage_file_exists(self, handler: RetentionRecordHandler):
-        """Test initialization fails when storage file already exists"""
+        """Test initialization does NOT fail when storage file already exists"""
 
         storage_file: Path = Path(handler.storage_file_path)
         storage_file.touch()
 
-        with pytest.raises(RetentionRecordHandlerError) as err:
-            handler._initialize_storage()
-
-        assert "storage file already exists" in str(err)
+        handler._initialize_storage()
 
     def test_initialize_storage_write_fails(self, tmp_path: Path):
         """Test initialization fails when writing to file fails"""

@@ -20,6 +20,7 @@ from deadline_test_fixtures.job_attachment_manager import JobAttachmentManager
 from pytest import LogCaptureFixture, TempPathFactory
 
 from deadline.job_attachments import asset_sync, download, upload
+from deadline.job_attachments.api import _attachment_sweep
 from deadline.job_attachments.asset_manifests import (
     ManifestVersion,
     HashAlgorithm,
@@ -1606,3 +1607,109 @@ def test_download_outputs_windows_long_file_path(
         )
     finally:
         shutil.rmtree(WINDOWS_UNC_PATH_STRING_PREFIX + long_root_path)
+
+
+def _setup_create_job(
+    upload_input_files_one_asset_in_cas: UploadInputFilesOneAssetInCasOutputs,
+    job_template: str,
+    job_attachment_test: JobAttachmentTest,
+) -> str:
+    """
+    Create a job with the provided template and wait for the job to be created.
+    """
+    farm_id: str = job_attachment_test.farm_id
+    queue_id: str = job_attachment_test.queue_id
+
+    # Setup failure for the test.
+    assert farm_id
+    assert queue_id
+
+    # Create a job w/ CAS data already created.
+    job_response = job_attachment_test.deadline_client.create_job(
+        farmId=farm_id,
+        queueId=queue_id,
+        attachments=upload_input_files_one_asset_in_cas.attachments.to_dict(),  # type: ignore
+        targetTaskRunStatus="SUSPENDED",
+        template=job_template,
+        templateType="JSON",
+        priority=50,
+    )
+
+    job_id: str = job_response["jobId"]
+
+    # Wait for the job to be created.
+    waiter = job_attachment_test.deadline_client.get_waiter("job_create_complete")
+    waiter.wait(
+        jobId=job_id,
+        queueId=job_attachment_test.queue_id,
+        farmId=job_attachment_test.farm_id,
+    )
+
+    # Return the created Job ID.
+    return job_id
+
+
+@pytest.mark.integ
+def test_attachment_sweep(
+    upload_input_files_one_asset_in_cas: UploadInputFilesOneAssetInCasOutputs,
+    default_job_template: str,
+    job_attachment_test: JobAttachmentTest,
+):
+    """
+    Test that the attachment sweep function can identify and process job attachments for cleanup.
+        Requires: S3_BATCH_JOB_ARN_ROLE env variable
+    """
+    # TODO: Improve integration test. Need scaffolding to test that the sweeper properly identifies active
+    # jobs/files and possibly test that objects are tagged correctly.
+
+    boto3_session: boto3.Session = boto3.Session()
+
+    # Get environment variables with proper access method
+    bucket_name: str = job_attachment_test.job_attachment_resources.bucket_name
+    bucket_root_prefix: str = job_attachment_test.bucket_root_prefix
+    s3_batch_job_arn_role: str = os.getenv("S3_BATCH_JOB_ARN_ROLE", "")
+
+    # Skip test if required environment variables are not set
+    if not s3_batch_job_arn_role:
+        pytest.skip("S3_BATCH_JOB_ARN_ROLE environment variable not set")
+
+    # Verify we have the necessary test data
+    assert bucket_name
+    assert bucket_root_prefix
+
+    _setup_create_job(
+        upload_input_files_one_asset_in_cas=upload_input_files_one_asset_in_cas,
+        job_template=default_job_template,
+        job_attachment_test=job_attachment_test,
+    )
+
+    # Count objects in bucket before sweep
+    objects_before = list(
+        job_attachment_test.bucket.objects.filter(Prefix=f"{bucket_root_prefix}/")
+    )
+
+    _attachment_sweep(
+        bucket_name=bucket_name,
+        root_prefix=bucket_root_prefix,
+        boto3_session=boto3_session,
+        s3_batch_job_arn_role=s3_batch_job_arn_role,
+        retention_days=1,
+    )
+
+    # Note: The actual deletion happens via S3 batch job, so we mainly verify
+    # the sweep process completed successfully without throwing exceptions
+    csv_manifest_key: str = f"{bucket_root_prefix}/delete_objects_manifest.csv"
+    s3_client = boto3.client("s3")
+    response = s3_client.get_object(Bucket=bucket_name, Key=csv_manifest_key)
+    csv_manifest = response["Body"].read().decode("utf-8")
+
+    assert len(csv_manifest) == 0, "CSV manifest should not contain any objects to delete"
+
+    objects_after = list(job_attachment_test.bucket.objects.filter(Prefix=f"{bucket_root_prefix}/"))
+
+    # Ensure number of objects is the same after sweep (S3 lifecycle policy handles deletion afterward)
+    assert len(objects_before) > 0
+    assert len(objects_before) + 1 == len(objects_after)  # +1 accounts for delete manifest
+
+    # After creation, S3 Batch job will fail because delete_objects_manifest.csv will be
+    # torn down before batch job can access it.

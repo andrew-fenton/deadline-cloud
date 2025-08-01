@@ -36,7 +36,7 @@ def test_cli_config_show_defaults(fresh_deadline_config):
     assert fresh_deadline_config in result.output
 
     # Assert the expected number of settings
-    assert len(settings.keys()) == 16
+    assert len(settings.keys()) == 17
 
     for setting_name in settings.keys():
         assert setting_name in result.output
@@ -106,6 +106,7 @@ def test_cli_config_show_modified_config(fresh_deadline_config):
     config.set_setting("settings.s3_max_pool_connections", "100")
     config.set_setting("settings.small_file_threshold_multiplier", "15")
     config.set_setting("settings.known_asset_paths", "/known/asset/path")
+    config.set_setting("defaults.s3_batch_job_role_arn", "arn::aws:iam::123:role/bucket-sweeper")
 
     runner = CliRunner()
     result = runner.invoke(main, ["config", "show"])

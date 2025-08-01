@@ -25,6 +25,10 @@ def _get_all_manifest_s3_keys_for_job(
     """
     Retrieves all manifest (both input and output) S3 keys for a specific job.
 
+    Note:
+        Ignores errors for missing manifests in S3 - not all jobs may have manifests
+            e.g if a job instantly fails
+
     Args:
         session: boto3 Session for AWS credentials
         job_attachment_settings: S3 job attachments settings
@@ -41,8 +45,11 @@ def _get_all_manifest_s3_keys_for_job(
     root_prefix: str = job_attachment_settings.rootPrefix.rstrip("/")
     output_manifest_prefix: str = f"{root_prefix}/Manifests/{farm_id}/{queue_id}/{job_id}/"
 
+    input_manifest_keys: List[str] = []
+    output_manifest_keys: List[str] = []
+
     try:
-        input_manifest_keys: List[str] = _get_input_manifest_keys_for_job(
+        input_manifest_keys = _get_input_manifest_keys_for_job(
             session=session,
             s3_root_prefix=job_attachment_settings.rootPrefix,
             farm_id=farm_id,
@@ -50,11 +57,17 @@ def _get_all_manifest_s3_keys_for_job(
             job_id=job_id,
         )
         # TODO: Implement fetching output manifests with JobAttachmentsLister
-        output_manifest_keys: List[str] = _get_tasks_manifests_keys_from_s3(
+        # TODO: current implementation stops retrieving output manifests after returning
+        #       not found job attachments error... need to fix we should continue looking for manifests
+        output_manifest_keys = _get_tasks_manifests_keys_from_s3(
             manifest_prefix=output_manifest_prefix,
             s3_bucket=job_attachment_settings.s3BucketName,
             session=session,
         )
+    except JobAttachmentsError as err:
+        # Ignore error if manifest cannot be found
+        if "Unable to find asset manifest in s3" not in str(err):
+            raise err
     except Exception as err:
         raise JobAttachmentsError(f"Failed to get all job manifest keys: {str(err)}") from err
 
