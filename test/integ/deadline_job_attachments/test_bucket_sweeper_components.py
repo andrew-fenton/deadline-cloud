@@ -54,6 +54,7 @@ def test_initialize_services(
         root_prefix="test-prefix",
         boto3_session=mock_boto3_session,
         role_arn="test-role-arn",
+        s3_inventory_manifest_key="",
     )
 
     assert isinstance(components, SweeperDependencies)

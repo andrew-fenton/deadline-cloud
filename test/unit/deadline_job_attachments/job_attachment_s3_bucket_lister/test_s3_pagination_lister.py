@@ -8,6 +8,7 @@ from unittest.mock import Mock
 from datetime import datetime
 from botocore.paginate import Paginator
 from botocore.exceptions import ClientError
+from datetime import timezone
 
 from deadline.job_attachments.exceptions import JobAttachmentsS3BucketListerError
 from deadline.job_attachments.job_attachments_s3_bucket_lister import S3PaginationLister
@@ -59,9 +60,9 @@ class TestS3PaginationLister:
 
         assert len(results) == 3
         assert results == [
-            {"Prefix": "queue-1/job-1/"},
-            {"Prefix": "queue-1/job-2/"},
-            {"Prefix": "queue-1/job-3/"},
+            "queue-1/job-1/",
+            "queue-1/job-2/",
+            "queue-1/job-3/",
         ]
 
         mock_paginator.paginate.assert_called_once_with(
@@ -270,7 +271,7 @@ class TestS3PaginationLister:
             S3ObjectData(
                 key="DeadlineCloud/prefix1/file1",
                 size=100,
-                last_modified=datetime(2025, 1, 1),
+                last_modified=datetime(2025, 1, 1, tzinfo=timezone.utc),
                 etag="abc123",
             )
         ]
@@ -279,13 +280,13 @@ class TestS3PaginationLister:
             S3ObjectData(
                 key="DeadlineCloud/prefix2/file2",
                 size=200,
-                last_modified=datetime(2025, 1, 2),
+                last_modified=datetime(2025, 1, 2, tzinfo=timezone.utc),
                 etag="def456",
             ),
             S3ObjectData(
                 key="DeadlineCloud/prefix2/file3",
                 size=300,
-                last_modified=datetime(2025, 1, 3),
+                last_modified=datetime(2025, 1, 3, tzinfo=timezone.utc),
                 etag="ghi789",
             ),
         ]
@@ -294,7 +295,7 @@ class TestS3PaginationLister:
             S3ObjectData(
                 key="DeadlineCloud/prefix3/file4",
                 size=400,
-                last_modified=datetime(2025, 1, 4),
+                last_modified=datetime(2025, 1, 4, tzinfo=timezone.utc),
                 etag="jkl012",
             )
         ]

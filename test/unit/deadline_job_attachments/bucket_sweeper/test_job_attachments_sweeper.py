@@ -201,7 +201,7 @@ class TestJobAttachmentsSweeper:
 
     def test_get_ids_from_common_prefixes_happy_path(self, processor: JobAttachmentsSweeper):
         """Test successfully getting IDs from common prefixes."""
-        mock_prefixes = [{"Prefix": "test/123/"}, {"Prefix": "test/456/"}, {"Prefix": "test/789/"}]
+        mock_prefixes = ["test/123/", "test/456/", "test/789/"]
         processor.job_attachments_s3_bucket_lister.list_common_prefixes_with_delimeter.return_value = mock_prefixes
 
         result = processor._get_ids_from_common_prefixes("test/")

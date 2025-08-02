@@ -1,9 +1,13 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 
+import io
 import boto3
+import gzip
+import csv
 
 from abc import ABC, abstractmethod
-from typing import Iterator, List, Tuple
+from typing import Iterator, List, Tuple, Any, Dict, TextIO, Set
+from datetime import datetime, timezone
 
 from botocore.paginate import Paginator
 from botocore.client import BaseClient
@@ -19,13 +23,15 @@ class JobAttachmentsS3BucketLister(ABC):
     """Interface for listing job attachments from S3."""
 
     @abstractmethod
-    def list_common_prefixes_with_delimeter(self, prefix: str) -> Iterator[str]:
+    def list_common_prefixes_with_delimeter(
+        self, prefix: str, delimiter: str = "/"
+    ) -> Iterator[str]:
         """
         Lists all common prefixes within the given S3 prefix.
 
         For example, if your S3 structure is:
         queue-1/job-1/...
-        queue-1/job-1/...
+        queue-1/job-1/...  # duplicate
         queue-1/job-2/...
 
         Then calling with prefix="queue-1/" will yield:
@@ -34,6 +40,7 @@ class JobAttachmentsS3BucketLister(ABC):
 
         Args:
             prefix (str): The S3 prefix to list from
+            delimiter (str): The delimiter to use for grouping (default: "/")
 
         Returns:
             Iterator[str]: Stream of common prefixes found
@@ -75,7 +82,7 @@ class JobAttachmentsS3BucketLister(ABC):
 
 
 class S3PaginationLister(JobAttachmentsS3BucketLister):
-    """Lister that uses S3 pagination to list objects from S3."""
+    """Object fetcher that uses S3 pagination to list objects from S3."""
 
     def __init__(self, boto3_session: boto3.Session, settings: JobAttachmentS3Settings):
         """
@@ -90,37 +97,19 @@ class S3PaginationLister(JobAttachmentsS3BucketLister):
         self.boto3_session = boto3_session
         self.settings = settings
 
-    def list_common_prefixes_with_delimeter(self, prefix: str) -> Iterator[str]:
-        """
-        Lists all common prefixes within the given S3 prefix.
-
-        For example, if your S3 structure is:
-        queue-1/job-1/...
-        queue-1/job-1/...
-        queue-1/job-2/...
-
-        Then calling with prefix="queue-1/" will yield:
-        - queue-1/job-1/
-        - queue-1/job-2/
-
-        Args:
-            prefix (str): The S3 prefix to list from
-
-        Returns:
-            Iterator[str]: Stream of common prefixes found
-
-        Raises:
-            JobAttachmentsS3BucketListerError: If S3 listing fails
-        """
+    def list_common_prefixes_with_delimeter(
+        self, prefix: str, delimiter: str = "/"
+    ) -> Iterator[str]:
+        """Implementation using S3 pagination API."""
         s3: BaseClient = get_s3_client(session=self.boto3_session)
         paginator: Paginator = s3.get_paginator("list_objects_v2")
 
         try:
             for page in paginator.paginate(
-                Bucket=self.settings.s3BucketName, Prefix=prefix, Delimiter="/"
+                Bucket=self.settings.s3BucketName, Prefix=prefix, Delimiter=delimiter
             ):
                 for object in page.get("CommonPrefixes", []):
-                    yield object
+                    yield object.get("Prefix")
         except ClientError as err:
             raise JobAttachmentsS3BucketListerError(
                 f"Failed to list job attachments from S3: {str(err)}"
@@ -130,19 +119,7 @@ class S3PaginationLister(JobAttachmentsS3BucketLister):
         self,
         prefix: str,
     ) -> Iterator[S3ObjectData]:
-        """
-        List all job attachments in S3 under a specified prefix.
-
-        Args:
-            prefix (str): The prefix path to list objects from within the S3 bucket.
-
-        Returns:
-            Iterator[S3ObjectData]: An iterator yielding S3ObjectData instances for
-                                  each object found.
-
-        Raises:
-            JobAttachmentsListerError: If there's an error listing objects from S3.
-        """
+        """Implementation using S3 pagination API."""
         s3: BaseClient = get_s3_client(session=self.boto3_session)
         paginator: Paginator = s3.get_paginator("list_objects_v2")
 
@@ -164,19 +141,9 @@ class S3PaginationLister(JobAttachmentsS3BucketLister):
         self, prefixes: List[str]
     ) -> Iterator[Tuple[str, S3ObjectData]]:
         """
-        List job attachments for multiple prefixes.
+        Implementation using S3 pagination API.
 
-        Args:
-            prefixes (List[str]): A list of prefix paths to list objects from.
-
-        Returns:
-            Iterator[Tuple[str, S3ObjectData]]: An iterator yielding tuples containing
-                                              the original prefix and the corresponding
-                                              S3ObjectData.
-
-        Note:
-            Currently implements sequential processing but will be implemented
-            with parallelism in the future.
+        Note: Currently sequential, will add parallelism in the future.
         """
         # TODO: Implement with parallelism
         for prefix in prefixes:
@@ -186,54 +153,93 @@ class S3PaginationLister(JobAttachmentsS3BucketLister):
 
 class S3InventoryLister(JobAttachmentsS3BucketLister):
     """
-    Lister that uses an S3 Inventory manifest to list objects from S3.
+    Object fetcher that uses an S3 Inventory manifest to list objects from S3.
 
     See for example data:
         https://docs.aws.amazon.com/AmazonS3/latest/userguide/storage-inventory.html
 
+    Warning:
+        This implementation loads the entire manifest file into memory during initialization. Large
+        manifest files may exhaust memory resources.
     """
 
-    def list_common_prefixes_with_delimeter(self, prefix) -> Iterator[str]:
-        """
-        Lists all common prefixes within the given S3 prefix from an S3 Inventory manifest.
+    def __init__(
+        self,
+        boto3_session: boto3.Session,
+        s3_settings: JobAttachmentS3Settings,
+        s3_inventory_manifest_key: str,
+    ):
+        self.boto3_session = boto3_session
+        self.s3_settings = s3_settings
+        self.s3_inventory_manifest_key = s3_inventory_manifest_key
+        self.manifest_data = self._get_s3_inventory_manifest()
 
-        Args:
-            prefix (str): The S3 prefix to list from
+    def list_common_prefixes_with_delimeter(self, prefix, delimiter: str = "/") -> Iterator[str]:
+        """Implementation using S3 Inventory manifest data."""
+        prefix_set: Set[str] = set()
 
-        Returns:
-            Iterator[str]: Stream of common prefixes found
+        for obj in self.manifest_data:
+            if obj.key.startswith(prefix):
+                # Find the next delimiter after the prefix
+                remaining_key: str = obj.key[len(prefix) :]
+                delimiter_pos: int = remaining_key.find(delimiter)
 
-        Raises:
-            JobAttachmentsS3BucketListerError: If S3 listing fails
-        """
-        return super().list_common_prefixes_with_delimeter(prefix)
+                if delimiter_pos != -1:
+                    # Include everything up to and including the delimiter
+                    common_prefix: str = obj.key[: len(prefix) + delimiter_pos + 1]
+                    prefix_set.add(common_prefix)
+
+        yield from prefix_set
 
     def list_job_attachments(self, prefix: str) -> Iterator[S3ObjectData]:
-        """
-        List job attachments under a specified prefix using S3 Inventory data.
-
-        Args:
-            prefix (str): The prefix path to filter objects from the S3 Inventory.
-
-        Returns:
-            Iterator[S3ObjectData]: An iterator yielding S3ObjectData instances for
-                                  each matching object in the inventory.
-        """
-        return super().list_job_attachments(prefix)
+        """Implementation using S3 Inventory manifest data."""
+        for object in self.manifest_data:
+            if object.key.startswith(prefix):
+                yield object
 
     def list_job_attachments_with_prefixes(
         self, prefixes: List[str]
     ) -> Iterator[Tuple[str, S3ObjectData]]:
         """
-        List job attachments for multiple prefixes using S3 Inventory data.
+        Implementation using S3 Inventory manifest data.
 
-        Args:
-            prefixes (List[str]): A list of prefix paths to filter objects from
-                                the S3 Inventory.
-
-        Returns:
-            Iterator[Tuple[str, S3ObjectData]]: An iterator yielding tuples containing
-                                              the original prefix and the corresponding
-                                              S3ObjectData.
+        Note: Currently sequential, will add parallelism in the future.
         """
-        return super().list_job_attachments_with_prefixes(prefixes)
+        # TODO: Implement with parallelism
+        for prefix in prefixes:
+            for object in self.list_job_attachments(prefix):
+                yield (prefix, object)
+
+    def _get_s3_inventory_manifest(self) -> List[S3ObjectData]:
+        s3: BaseClient = get_s3_client(session=self.boto3_session)
+
+        try:
+            response: Dict[str, Any] = s3.get_object(
+                Bucket=self.s3_settings.s3BucketName, Key=self.s3_inventory_manifest_key
+            )
+
+            # S3 inventory manifests are compressed (.gz)
+            compressed_data: bytes = response["Body"].read()
+            decompressed_data: str = gzip.decompress(compressed_data).decode("utf-8")
+
+            # Manifest CSV file does not provide headers i.e first row is object data
+            csv_file: TextIO = io.StringIO(decompressed_data)
+            csv_reader: Iterator[List[str]] = csv.reader(csv_file)
+
+            return [
+                S3ObjectData(
+                    key=row[1],
+                    size=int(row[2]),
+                    last_modified=datetime.strptime(row[3], "%Y-%m-%dT%H:%M:%S.%fZ").replace(tzinfo=timezone.utc),
+                    etag=row[4],
+                )
+                for row in csv_reader
+            ]
+        except ClientError as err:
+            raise JobAttachmentsS3BucketListerError(
+                f"Failed to download S3 Inventory manifest from S3: {str(err)}"
+            ) from err
+        except MemoryError as err:
+            raise JobAttachmentsS3BucketListerError(
+                f"Failed to load S3 Inventory manifest into memory: {str(err)}"
+            ) from err

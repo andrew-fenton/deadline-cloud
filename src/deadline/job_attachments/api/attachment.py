@@ -296,6 +296,7 @@ def _attachment_sweep(
     s3_batch_job_arn_role: str,
     retention_days: int = 120,
     dry_run: bool = False,
+    s3_inventory_manifest_key: str = "",
     logging_function_callback: Callable[[str], None] = lambda msg: None,
 ) -> None:
     """
@@ -316,6 +317,7 @@ def _attachment_sweep(
                     (today - retention_days) will be deleted. Must be between 0 and 120.
                     Defaults to 120.
         dry_run: flag to create S3 batch operations job
+        s3_inventory_manifest_key: object key for s3 inventory manifest to list from
         logging_function_callback: signature for logging function
 
     Retention Logic:
@@ -348,6 +350,9 @@ def _attachment_sweep(
 
     logging_function_callback(f"Retaining all files last used on or after: {retention_datetime}")
 
+    if s3_inventory_manifest_key:
+        logging_function_callback(f"S3 Inventory manifest key provied, listing job attachments from: {s3_inventory_manifest_key}")
+    
     # Initialize services
     components: SweeperDependencies = _initialize_dependencies(
         working_directory=working_directory,
@@ -355,6 +360,7 @@ def _attachment_sweep(
         root_prefix=root_prefix,
         boto3_session=boto3_session,
         role_arn=s3_batch_job_arn_role,
+        s3_inventory_manifest_key=s3_inventory_manifest_key
     )
     sweeper: JobAttachmentsSweeper = components.sweeper
     job_attachment_s3_settings: JobAttachmentS3Settings = components.job_attachment_s3_settings

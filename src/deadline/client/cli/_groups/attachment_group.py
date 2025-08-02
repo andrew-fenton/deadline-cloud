@@ -237,6 +237,11 @@ def attachment_upload(
     help="Role ARN for executing S3 batch operations tagging job",
 )
 @click.option(
+    "--s3-inventory-manifest-key",
+    required=False,
+    help="S3 object key of the S3 Inventory manifest to use for cleanup. If not provided, cleanup will use pagination instead.",
+)
+@click.option(
     "--dry-run",
     default=False,
     is_flag=True,
@@ -250,6 +255,7 @@ def cleanup(
     role_arn: str,
     dry_run: bool,
     json: bool,
+    s3_inventory_manifest_key: str = "",
     retention_days: int = 120,
     **args,
 ):
@@ -274,5 +280,6 @@ def cleanup(
         s3_batch_job_arn_role=role_arn,
         retention_days=retention_days,
         dry_run=dry_run,
+        s3_inventory_manifest_key=s3_inventory_manifest_key,
         logging_function_callback=logger.echo,
     )
