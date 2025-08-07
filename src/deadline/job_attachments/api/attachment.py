@@ -351,7 +351,7 @@ def _attachment_sweep(
     logging_function_callback(f"Retaining all files last used on or after: {retention_datetime}")
 
     if s3_inventory_manifest_key:
-        logging_function_callback(f"S3 Inventory manifest key provied, listing job attachments from: {s3_inventory_manifest_key}")
+        logging_function_callback(f"S3 Inventory manifest key provided, listing job attachments from: {s3_inventory_manifest_key}")
     
     # Initialize services
     components: SweeperDependencies = _initialize_dependencies(
