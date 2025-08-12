@@ -9,6 +9,7 @@ import time
 from typing import Any, Callable, Optional, Tuple, Type, Union
 import uuid
 import sys
+from deadline.job_attachments._aws.aws_clients import get_s3_max_pool_connections
 
 __all__ = [
     "_join_s3_paths",
@@ -36,6 +37,11 @@ WINDOWS_UNC_PATH_STRING_PREFIX = "\\\\?\\"
 """
 When this is prepended to any path on Windows,
 it becomes a UNC path and is allowed to go over the 260 max path length limit.
+"""
+
+S3_DOWNLOAD_MAX_CONCURRENCY = 10
+"""
+Max number of concurrent S3 downloads. Used in download workers calculation.
 """
 
 
@@ -185,3 +191,16 @@ def _retry(
         return f_retry  # true decorator
 
     return deco_retry
+
+
+def _get_num_download_workers() -> int:
+    """
+    Determines the max number of thread workers for downloading multiple files in parallel,
+    based on the allowed S3 max pool connections size. If the max worker count is calculated
+    to be 0 due to a small pool connections size limit, it returns 1.
+    """
+    num_download_workers = int(get_s3_max_pool_connections() / S3_DOWNLOAD_MAX_CONCURRENCY)
+    if num_download_workers <= 0:
+        # This can result in triggering "Connection pool is full" warning messages during downloads.
+        num_download_workers = 1
+    return num_download_workers

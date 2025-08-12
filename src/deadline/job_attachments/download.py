@@ -58,7 +58,6 @@ from .progress_tracker import (
 from ._aws.aws_clients import (
     get_account_id,
     get_s3_client,
-    get_s3_max_pool_connections,
     get_s3_transfer_manager,
 )
 from .os_file_permission import (
@@ -72,6 +71,7 @@ from ._utils import (
     _get_long_path_compatible_path,
     _is_relative_to,
     _join_s3_paths,
+    _get_num_download_workers,
 )
 from threading import Lock
 
@@ -929,19 +929,6 @@ def download_files_from_manifests(
 
     progress_tracker.total_time = time.perf_counter() - start_time
     return progress_tracker.get_download_summary_statistics(downloaded_files_paths_by_root)
-
-
-def _get_num_download_workers() -> int:
-    """
-    Determines the max number of thread workers for downloading multiple files in parallel,
-    based on the allowed S3 max pool connections size. If the max worker count is calculated
-    to be 0 due to a small pool connections size limit, it returns 1.
-    """
-    num_download_workers = int(get_s3_max_pool_connections() / S3_DOWNLOAD_MAX_CONCURRENCY)
-    if num_download_workers <= 0:
-        # This can result in triggering "Connection pool is full" warning messages during downloads.
-        num_download_workers = 1
-    return num_download_workers
 
 
 def _set_fs_group(

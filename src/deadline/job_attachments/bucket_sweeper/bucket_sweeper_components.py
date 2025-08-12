@@ -21,7 +21,7 @@ from ..manifest_handling import (
     _load_manifests_from_disk,
     _extract_asset_hashes_from_manifests,
 )
-from ..manifest_download import _download_job_manifests_using_s3_keys
+from ..manifest_download import _download_job_manifests_using_s3_keys_to_disk
 from ..asset_manifests.base_manifest import BaseAssetManifest
 
 from deadline.client.api._list_active_job_ids import _list_active_job_ids
@@ -192,7 +192,7 @@ def _process_manifests_and_create_retention_records(
             queue_id=queue_id,
             job_id=job_id,
         )
-        _download_job_manifests_using_s3_keys(
+        _download_job_manifests_using_s3_keys_to_disk(
             session=boto3_session,
             manifest_keys=manifest_keys,
             job_attachment_settings=job_attachment_s3_settings,

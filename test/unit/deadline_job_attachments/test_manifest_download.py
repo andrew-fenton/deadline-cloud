@@ -1,18 +1,20 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 
 import pytest
+import time
 
 from botocore.exceptions import ClientError
 from typing import List
 from unittest.mock import MagicMock, patch
+from pathlib import Path
 
 from deadline.job_attachments.exceptions import JobAttachmentsError
-from deadline.job_attachments.manifest_download import _download_job_manifests_using_s3_keys
+from deadline.job_attachments.manifest_download import _download_job_manifests_using_s3_keys_to_disk
 from deadline.job_attachments.models import JobAttachmentS3Settings
 
 
 class TestManifestDownload:
-    def test_download_job_manifests_happy_path(self):
+    def test_download_job_manifests_happy_path(self, tmp_path: Path):
         """Test successful download of job manifests"""
         mock_session: MagicMock = MagicMock()
         mock_s3_client: MagicMock = MagicMock()
@@ -23,12 +25,12 @@ class TestManifestDownload:
         job_settings: JobAttachmentS3Settings = JobAttachmentS3Settings(
             rootPrefix="DeadlineCloud", s3BucketName="deadline-bucket"
         )
-        download_directory: str = "/test/manifests"
+        download_directory: Path = tmp_path / "manifests"
 
         with patch(
             "deadline.job_attachments.manifest_download.get_s3_client", return_value=mock_s3_client
         ):
-            _download_job_manifests_using_s3_keys(
+            _download_job_manifests_using_s3_keys_to_disk(
                 session=mock_session,
                 manifest_keys=manifest_keys,
                 job_attachment_settings=job_settings,
@@ -47,17 +49,17 @@ class TestManifestDownload:
             f"{download_directory}/section-action_manifest_output",
         )
 
-    def test_download_job_manifests_malformed_key(self):
+    def test_download_job_manifests_malformed_key(self, tmp_path: Path):
         """Test error handling for malformed manifest key"""
         mock_session: MagicMock = MagicMock()
         manifest_keys: List[str] = ["malformed_key"]
         job_settings: JobAttachmentS3Settings = JobAttachmentS3Settings(
             rootPrefix="DeadlineCloud", s3BucketName="deadline-bucket"
         )
-        download_directory: str = "/test/manifests"
+        download_directory: Path = tmp_path / "manifests"
 
         with pytest.raises(JobAttachmentsError) as error:
-            _download_job_manifests_using_s3_keys(
+            _download_job_manifests_using_s3_keys_to_disk(
                 session=mock_session,
                 manifest_keys=manifest_keys,
                 job_attachment_settings=job_settings,
@@ -66,7 +68,27 @@ class TestManifestDownload:
 
         assert "Invalid manifest key structure: malformed_key" in str(error.value)
 
-    def test_download_job_manifests_client_error(self):
+    def test_download_job_manifests_non_existent_directory(self, tmp_path: Path):
+        """Test error handling for non existent download directory"""
+        mock_session: MagicMock = MagicMock()
+        manifest_keys: List[str] = [
+            "DeadlineCloud/Manifests/farm-123/queue-456/Inputs/abc123/manifest_input"
+        ]
+        job_settings: JobAttachmentS3Settings = JobAttachmentS3Settings(
+            rootPrefix="DeadlineCloud", s3BucketName="deadline-bucket"
+        )
+        download_directory: Path = tmp_path / "does_not_exist"
+
+        _download_job_manifests_using_s3_keys_to_disk(
+            session=mock_session,
+            manifest_keys=manifest_keys,
+            job_attachment_settings=job_settings,
+            download_directory=download_directory,
+        )
+
+        assert download_directory.exists()
+
+    def test_download_job_manifests_client_error(self, tmp_path: Path):
         """Test error handling for ClientError during download"""
         mock_session: MagicMock = MagicMock()
         mock_s3_client: MagicMock = MagicMock()
@@ -83,13 +105,13 @@ class TestManifestDownload:
         job_settings: JobAttachmentS3Settings = JobAttachmentS3Settings(
             rootPrefix="DeadlineCloud", s3BucketName="deadline-bucket"
         )
-        download_directory: str = "/tmp/manifests"
+        download_directory: Path = tmp_path / "manifests"
 
         with patch(
             "deadline.job_attachments.manifest_download.get_s3_client", return_value=mock_s3_client
         ):
             with pytest.raises(JobAttachmentsError) as error:
-                _download_job_manifests_using_s3_keys(
+                _download_job_manifests_using_s3_keys_to_disk(
                     session=mock_session,
                     manifest_keys=manifest_keys,
                     job_attachment_settings=job_settings,
@@ -98,8 +120,8 @@ class TestManifestDownload:
 
         assert "Failed to download manifest" in str(error.value)
 
-    def test_download_job_manifests_io_error(self):
-        """Test error handling for IOError during download"""
+    def test_download_job_manifests_fails_fast_on_first_download_error(self, tmp_path: Path):
+        """Test download job manifests fails fast"""
         mock_session: MagicMock = MagicMock()
         mock_s3_client: MagicMock = MagicMock()
         mock_s3_client.download_file.side_effect = IOError("Permission denied")
@@ -110,13 +132,13 @@ class TestManifestDownload:
         job_settings: JobAttachmentS3Settings = JobAttachmentS3Settings(
             rootPrefix="DeadlineCloud", s3BucketName="deadline-bucket"
         )
-        download_directory: str = "/test/manifests"
+        download_directory: Path = tmp_path / "manifests"
 
         with patch(
             "deadline.job_attachments.manifest_download.get_s3_client", return_value=mock_s3_client
         ):
             with pytest.raises(JobAttachmentsError) as error:
-                _download_job_manifests_using_s3_keys(
+                _download_job_manifests_using_s3_keys_to_disk(
                     session=mock_session,
                     manifest_keys=manifest_keys,
                     job_attachment_settings=job_settings,
@@ -124,3 +146,31 @@ class TestManifestDownload:
                 )
 
         assert "Failed to download manifest" in str(error.value)
+
+    def test_download_job_manifests_concurrent_behaviour(self):
+        """Test that downloads happen concurrently"""
+
+        mock_session = MagicMock()
+        mock_s3_client = MagicMock()
+
+        def slow_download(*args):
+            time.sleep(0.1)  # Simulate network delay
+
+        mock_s3_client.download_file.side_effect = slow_download
+        manifest_keys = ["path/file1", "path/file2", "path/file3"]
+
+        with patch(
+            "deadline.job_attachments.manifest_download.get_s3_client", return_value=mock_s3_client
+        ):
+            start_time = time.time()
+            _download_job_manifests_using_s3_keys_to_disk(
+                mock_session,
+                manifest_keys,
+                JobAttachmentS3Settings(rootPrefix="test", s3BucketName="bucket"),
+                Path("/tmp"),
+            )
+            elapsed = time.time() - start_time
+
+        # If sequential: 3 * 0.1 = 0.3s, if parallel: ~0.1s
+        assert elapsed < 0.2, "Should complete faster than sequential execution"
+        assert mock_s3_client.download_file.call_count == 3
