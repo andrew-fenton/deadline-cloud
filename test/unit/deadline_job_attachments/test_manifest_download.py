@@ -124,10 +124,20 @@ class TestManifestDownload:
         """Test download job manifests fails fast"""
         mock_session: MagicMock = MagicMock()
         mock_s3_client: MagicMock = MagicMock()
-        mock_s3_client.download_file.side_effect = IOError("Permission denied")
+        
+        def selective_download_error(bucket_name, key, local_path):
+            # Only raise error for a single manifest
+            if "step-1/task-1/section-action/manifest_output" in key:
+                raise IOError()
+            # For other manifests, simulate successful download by doing nothing
+            return None
+        
+        mock_s3_client.download_file.side_effect = selective_download_error
 
         manifest_keys: List[str] = [
-            "DeadlineCloud/Manifests/farm-123/queue-456/Inputs/abc123/manifest_input"
+            "DeadlineCloud/Manifests/farm-123/queue-456/Inputs/abc123/manifest_input",
+            "DeadlineCloud/Manifests/farm-123/queue-456/job-789/step-1/task-1/section-action/manifest_output",
+            "DeadlineCloud/Manifests/farm-123/queue-456/job-789/step-2/task-1/section-action/manifest_output",
         ]
         job_settings: JobAttachmentS3Settings = JobAttachmentS3Settings(
             rootPrefix="DeadlineCloud", s3BucketName="deadline-bucket"
@@ -146,6 +156,10 @@ class TestManifestDownload:
                 )
 
         assert "Failed to download manifest" in str(error.value)
+        assert "step-1/task-1/section-action/manifest_output" in str(error.value)
+
+        assert "Inputs/abc123/manifest_input" not in str(error.value)
+        assert "step-2/task-1/section-action/manifest_output" not in str(error.value)
 
     def test_download_job_manifests_concurrent_behaviour(self):
         """Test that downloads happen concurrently"""
