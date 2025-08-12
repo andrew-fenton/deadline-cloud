@@ -107,7 +107,7 @@ def test_process_manifests_and_create_retention_records(
     with patch(
         "deadline.job_attachments.bucket_sweeper.bucket_sweeper_components._get_all_manifest_s3_keys_for_job"
     ) as mock_get_keys, patch(
-        "deadline.job_attachments.bucket_sweeper.bucket_sweeper_components._download_job_manifests_using_s3_keys"
+        "deadline.job_attachments.bucket_sweeper.bucket_sweeper_components._download_job_manifests_using_s3_keys_to_disk"
     ) as mock_download, patch(
         "deadline.job_attachments.bucket_sweeper.bucket_sweeper_components._load_manifests_from_disk"
     ) as mock_load, patch(
