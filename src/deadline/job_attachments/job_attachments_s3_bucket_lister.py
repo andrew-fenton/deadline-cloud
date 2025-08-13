@@ -107,7 +107,27 @@ class S3PaginationLister(JobAttachmentsS3BucketLister):
     def list_common_prefixes_with_delimeter(
         self, prefix: str, delimiter: str = "/"
     ) -> Iterator[str]:
-        """Implementation using S3 pagination API."""
+        """
+        Lists all common prefixes within the given S3 prefix using pagination.
+
+        For example, if your S3 structure is:
+        queue-1/job-1/...
+        queue-1/job-1/...
+        queue-1/job-2/...
+
+        Then calling with prefix="queue-1/" will yield:
+        - queue-1/job-1/
+        - queue-1/job-2/
+
+        Args:
+            prefix (str): The S3 prefix to list from
+
+        Returns:
+            Iterator[str]: Stream of common prefixes found
+
+        Raises:
+            JobAttachmentsS3BucketListerError: If S3 listing fails
+        """
         s3: BaseClient = get_s3_client(session=self.boto3_session)
         paginator: Paginator = s3.get_paginator("list_objects_v2")
 
@@ -126,7 +146,19 @@ class S3PaginationLister(JobAttachmentsS3BucketLister):
         self,
         prefix: str,
     ) -> Iterator[S3ObjectData]:
-        """Implementation using S3 pagination API."""
+        """
+        List all job attachments in S3 under a specified prefix using pagination.
+
+        Args:
+            prefix (str): The prefix path to list objects from within the S3 bucket.
+
+        Returns:
+            Iterator[S3ObjectData]: An iterator yielding S3ObjectData instances for
+                                  each object found.
+
+        Raises:
+            JobAttachmentsListerError: If there's an error listing objects from S3.
+        """
         s3: BaseClient = get_s3_client(session=self.boto3_session)
         paginator: Paginator = s3.get_paginator("list_objects_v2")
 
@@ -148,9 +180,19 @@ class S3PaginationLister(JobAttachmentsS3BucketLister):
         self, prefixes: List[str]
     ) -> Iterator[Tuple[str, S3ObjectData]]:
         """
-        Implementation using S3 pagination API.
+        List job attachments for multiple prefixes using pagination.
 
-        Note: Currently sequential, will add parallelism in the future.
+        Args:
+            prefixes (List[str]): A list of prefix paths to list objects from.
+
+        Returns:
+            Iterator[Tuple[str, S3ObjectData]]: An iterator yielding tuples containing
+                                              the original prefix and the corresponding
+                                              S3ObjectData.
+
+        Note:
+            Currently implements sequential processing but will be implemented
+            with parallelism in the future.
         """
         # TODO: Implement with parallelism
         for prefix in prefixes:
@@ -185,7 +227,27 @@ class S3InventoryLister(JobAttachmentsS3BucketLister):
     def list_common_prefixes_with_delimeter(
         self, prefix: str, delimiter: str = "/"
     ) -> Iterator[str]:
-        """Implementation using S3 Inventory manifest data."""
+        """
+        Lists all common prefixes within the given S3 prefix using an S3 Inventory manifest.
+
+        For example, if your S3 structure is:
+        queue-1/job-1/...
+        queue-1/job-1/...  # duplicate
+        queue-1/job-2/...
+
+        Then calling with prefix="queue-1/" will yield:
+        - queue-1/job-1/
+        - queue-1/job-2/
+
+        Args:
+            prefix (str): The S3 prefix to list from
+
+        Returns:
+            Iterator[str]: Stream of common prefixes found
+
+        Raises:
+            JobAttachmentsS3BucketListerError: If S3 listing fails
+        """
         prefix_set: Set[str] = set()
 
         for obj in self.manifest_data:
@@ -202,7 +264,19 @@ class S3InventoryLister(JobAttachmentsS3BucketLister):
         yield from prefix_set
 
     def list_job_attachments(self, prefix: str) -> Iterator[S3ObjectData]:
-        """Implementation using S3 Inventory manifest data."""
+        """
+        List all job attachments in S3 under a specified prefix using an S3 Inventory manifest.
+
+        Args:
+            prefix (str): The prefix path to list objects from within the S3 bucket.
+
+        Returns:
+            Iterator[S3ObjectData]: An iterator yielding S3ObjectData instances for
+                                  each object found.
+
+        Raises:
+            JobAttachmentsListerError: If there's an error listing objects from S3.
+        """
         for object in self.manifest_data:
             if object.key.startswith(prefix):
                 yield object
@@ -211,9 +285,19 @@ class S3InventoryLister(JobAttachmentsS3BucketLister):
         self, prefixes: List[str]
     ) -> Iterator[Tuple[str, S3ObjectData]]:
         """
-        Implementation using S3 Inventory manifest data.
+        List job attachments for multiple prefixes using an S3 Inventory manifest.
 
-        Note: Currently sequential, will add parallelism in the future.
+        Args:
+            prefixes (List[str]): A list of prefix paths to list objects from.
+
+        Returns:
+            Iterator[Tuple[str, S3ObjectData]]: An iterator yielding tuples containing
+                                              the original prefix and the corresponding
+                                              S3ObjectData.
+
+        Note:
+            Currently implements sequential processing but will be implemented
+            with parallelism in the future.
         """
         # TODO: Implement with parallelism
         for prefix in prefixes:
@@ -221,6 +305,15 @@ class S3InventoryLister(JobAttachmentsS3BucketLister):
                 yield (prefix, object)
 
     def _get_s3_inventory_manifest(self) -> List[S3ObjectData]:
+        """
+        Downloads and parses S3 inventory manifest file, returning object metadata.
+        
+        Returns:
+            List of S3ObjectData containing key, size, last_modified, and etag for each object.
+            
+        Raises:
+            JobAttachmentsS3BucketListerError: If download fails or manifest cannot be loaded into memory.
+        """
         self._check_manifest_file_size_fits_into_memory()
 
         try:
