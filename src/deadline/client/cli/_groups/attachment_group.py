@@ -22,7 +22,11 @@ from deadline.client import api
 from deadline.job_attachments import api as attachment_api
 from deadline.job_attachments._aws.deadline import get_queue
 from deadline.job_attachments.exceptions import MissingJobAttachmentSettingsError
-from deadline.job_attachments.models import FileConflictResolution, JobAttachmentS3Settings, JobAttachmentFetchingStrategy
+from deadline.job_attachments.models import (
+    FileConflictResolution,
+    JobAttachmentS3Settings,
+    JobAttachmentFetchingStrategy,
+)
 
 
 @click.group(name="attachment")
@@ -243,7 +247,7 @@ def attachment_upload(
         case_sensitive=False,
     ),
     required=False,
-    help="Strategy for fetching job attachments from S3"
+    help="Strategy for fetching job attachments from S3",
 )
 @click.option(
     "--job-attachments-file-key",
@@ -282,7 +286,7 @@ def cleanup(
         role_arn: str = config_file.get_setting("defaults.s3_batch_job_role_arn", config=config)
     else:
         config_file.set_setting("defaults.s3_batch_job_role_arn", role_arn, config=config)
-    
+
     # Use pagination if no strategy is provided
     if not job_attachment_fetching_strategy:
         job_attachment_fetching_strategy = JobAttachmentFetchingStrategy.PAGINATION

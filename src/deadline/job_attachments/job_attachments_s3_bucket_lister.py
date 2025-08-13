@@ -25,6 +25,7 @@ GZIP_UNCOMPRESSED_TO_COMPRESSED_RATIO = 7
 # The maximum amount of memory the S3 inventory manfiest should take up
 MEMORY_THRESHOLD = 0.4
 
+
 class JobAttachmentsS3BucketLister(ABC):
     """Interface for listing job attachments from S3."""
 
@@ -181,7 +182,9 @@ class S3InventoryLister(JobAttachmentsS3BucketLister):
         self.job_attachments_file_key = job_attachments_file_key
         self.manifest_data = self._get_s3_inventory_manifest()
 
-    def list_common_prefixes_with_delimeter(self, prefix: str, delimiter: str = "/") -> Iterator[str]:
+    def list_common_prefixes_with_delimeter(
+        self, prefix: str, delimiter: str = "/"
+    ) -> Iterator[str]:
         """Implementation using S3 Inventory manifest data."""
         prefix_set: Set[str] = set()
 
@@ -253,7 +256,7 @@ class S3InventoryLister(JobAttachmentsS3BucketLister):
             raise JobAttachmentsS3BucketListerError(
                 f"Failed to load S3 Inventory manifest into memory: {str(err)}"
             ) from err
-    
+
     def _check_manifest_file_size_fits_into_memory(self) -> None:
         """
         Check if the manifest file is too large to be loaded into memory.
@@ -265,12 +268,14 @@ class S3InventoryLister(JobAttachmentsS3BucketLister):
             Bucket=self.s3_settings.s3BucketName, Key=self.job_attachments_file_key
         )
 
-        print(response)
-
         # All values in bytes
         compressed_file_size: int = int(response["ContentLength"])
-        estimated_uncompressed_size: int = compressed_file_size * GZIP_UNCOMPRESSED_TO_COMPRESSED_RATIO
+        estimated_uncompressed_size: int = (
+            compressed_file_size * GZIP_UNCOMPRESSED_TO_COMPRESSED_RATIO
+        )
         available_memory_with_threshold: int = psutil.virtual_memory().available * MEMORY_THRESHOLD
-        
+
         if estimated_uncompressed_size >= available_memory_with_threshold:
-            raise JobAttachmentsS3BucketListerError("S3 Inventory manifest is too large for available memory")
+            raise JobAttachmentsS3BucketListerError(
+                "S3 Inventory manifest is too large for available memory"
+            )

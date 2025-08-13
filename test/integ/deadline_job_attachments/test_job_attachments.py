@@ -33,7 +33,7 @@ from deadline.job_attachments.models import (
     Attachments,
     ManifestProperties,
     PathFormat,
-    JobAttachmentFetchingStrategy
+    JobAttachmentFetchingStrategy,
 )
 from deadline.job_attachments.progress_tracker import SummaryStatistics
 from deadline.job_attachments._utils import (

@@ -2,7 +2,6 @@
 
 import boto3
 
-from enum import Enum
 from typing import Optional
 
 from .job_attachments_s3_bucket_lister import (

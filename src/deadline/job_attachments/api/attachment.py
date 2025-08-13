@@ -31,7 +31,9 @@ from deadline.job_attachments.bucket_sweeper.retention_record_handler import Ret
 from deadline.job_attachments.models import FarmQueueJobTriple
 from deadline.job_attachments.progress_tracker import DownloadSummaryStatistics
 from deadline.job_attachments.upload import S3AssetUploader
-from deadline.job_attachments.job_attachment_object_fetcher_strategy import JobAttachmentFetchingStrategy 
+from deadline.job_attachments.job_attachment_object_fetcher_strategy import (
+    JobAttachmentFetchingStrategy,
+)
 from deadline.client.cli._groups.click_logger import ClickLogger
 from deadline.client.config import config_file
 from deadline.client.exceptions import NonValidInputError

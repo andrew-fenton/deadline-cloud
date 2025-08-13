@@ -5,7 +5,7 @@ import boto3
 import gzip
 import io
 
-from typing import List, Dict, Tuple
+from typing import List, Tuple
 from unittest.mock import Mock, patch
 from datetime import datetime
 from botocore.exceptions import ClientError
@@ -131,9 +131,15 @@ class TestS3InventoryLister:
         assert obj2.key == "queue-2/job-1/file3.txt"
 
     @patch("deadline.job_attachments.job_attachments_s3_bucket_lister.get_s3_client")
-    @patch("deadline.job_attachments.job_attachments_s3_bucket_lister.S3InventoryLister._check_manifest_file_size_fits_into_memory")
+    @patch(
+        "deadline.job_attachments.job_attachments_s3_bucket_lister.S3InventoryLister._check_manifest_file_size_fits_into_memory"
+    )
     def test_get_s3_inventory_manifest_happy_path(
-        self, mock_memory_check: Mock, mock_get_s3_client: Mock, mock_session: Mock, settings: JobAttachmentS3Settings
+        self,
+        mock_memory_check: Mock,
+        mock_get_s3_client: Mock,
+        mock_session: Mock,
+        settings: JobAttachmentS3Settings,
     ) -> None:
         """Test successful manifest download, decompression, and parsing"""
         mock_memory_check.return_value = None
@@ -174,9 +180,15 @@ class TestS3InventoryLister:
         )
 
     @patch("deadline.job_attachments.job_attachments_s3_bucket_lister.get_s3_client")
-    @patch("deadline.job_attachments.job_attachments_s3_bucket_lister.S3InventoryLister._check_manifest_file_size_fits_into_memory")
+    @patch(
+        "deadline.job_attachments.job_attachments_s3_bucket_lister.S3InventoryLister._check_manifest_file_size_fits_into_memory"
+    )
     def test_get_job_attachments_file_key_not_exists(
-        self, mock_memory_check: Mock, mock_get_s3_client: Mock, mock_session: Mock, settings: JobAttachmentS3Settings
+        self,
+        mock_memory_check: Mock,
+        mock_get_s3_client: Mock,
+        mock_session: Mock,
+        settings: JobAttachmentS3Settings,
     ) -> None:
         """Test that missing manifest key raises JobAttachmentsS3BucketListerError"""
         mock_memory_check.return_value = None
@@ -201,7 +213,11 @@ class TestS3InventoryLister:
     @patch("deadline.job_attachments.job_attachments_s3_bucket_lister.psutil")
     @patch("deadline.job_attachments.job_attachments_s3_bucket_lister.get_s3_client")
     def test_check_manifest_file_size_fits_into_memory_too_large(
-        self, mock_get_s3_client: Mock, mock_psutil: Mock, mock_session: Mock, settings: JobAttachmentS3Settings
+        self,
+        mock_get_s3_client: Mock,
+        mock_psutil: Mock,
+        mock_session: Mock,
+        settings: JobAttachmentS3Settings,
     ) -> None:
         """Test that manifest file size check raises error when file is too large for available memory"""
         mock_s3_client: Mock = Mock()

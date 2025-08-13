@@ -56,7 +56,6 @@ def test_initialize_services(
         role_arn="test-role-arn",
         job_attachment_fetching_strategy=JobAttachmentFetchingStrategy.PAGINATION,
         job_attachments_file_key="",
-        
     )
 
     assert isinstance(components, SweeperDependencies)

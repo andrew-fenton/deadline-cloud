@@ -39,13 +39,13 @@ class TestJobAttachmentObjectFetcherFactory:
 
         assert isinstance(result, S3PaginationLister)
 
-    def test_create_inventory_strategy(
-        self, mock_session: Mock, settings: JobAttachmentS3Settings
-    ):
+    def test_create_inventory_strategy(self, mock_session: Mock, settings: JobAttachmentS3Settings):
         """Test that the factory returns a S3InventoryLister for INVENTORY strategy."""
         manifest_key: str = "test-manifest-key"
 
-        with patch("deadline.job_attachments.job_attachments_s3_bucket_lister.S3InventoryLister._get_s3_inventory_manifest") as mock_get_manifest:
+        with patch(
+            "deadline.job_attachments.job_attachments_s3_bucket_lister.S3InventoryLister._get_s3_inventory_manifest"
+        ) as mock_get_manifest:
             mock_get_manifest.return_value = None
 
             result: JobAttachmentsS3BucketLister = JobAttachmentObjectFetcherFactory.create(
@@ -82,5 +82,5 @@ class TestJobAttachmentObjectFetcherFactory:
                 boto3_session=mock_session,
                 settings=settings,
             )
-        
+
         assert "Unknown strategy" in str(error)
