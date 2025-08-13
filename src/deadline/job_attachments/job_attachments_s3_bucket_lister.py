@@ -4,6 +4,7 @@ import io
 import boto3
 import gzip
 import csv
+import psutil
 
 from abc import ABC, abstractmethod
 from typing import Iterator, List, Tuple, Any, Dict, TextIO, Set
@@ -18,6 +19,11 @@ from .exceptions import JobAttachmentsS3BucketListerError
 
 from deadline.client.api._session import get_s3_client
 
+# Derived by comparing unzipped to zipped file sizes
+GZIP_UNCOMPRESSED_TO_COMPRESSED_RATIO = 7
+
+# The maximum amount of memory the S3 inventory manfiest should take up
+MEMORY_THRESHOLD = 0.4
 
 class JobAttachmentsS3BucketLister(ABC):
     """Interface for listing job attachments from S3."""
@@ -167,14 +173,15 @@ class S3InventoryLister(JobAttachmentsS3BucketLister):
         self,
         boto3_session: boto3.Session,
         s3_settings: JobAttachmentS3Settings,
-        s3_inventory_manifest_key: str,
+        job_attachments_file_key: str,
     ):
         self.boto3_session = boto3_session
+        self.s3_client = get_s3_client(session=self.boto3_session)
         self.s3_settings = s3_settings
-        self.s3_inventory_manifest_key = s3_inventory_manifest_key
+        self.job_attachments_file_key = job_attachments_file_key
         self.manifest_data = self._get_s3_inventory_manifest()
 
-    def list_common_prefixes_with_delimeter(self, prefix, delimiter: str = "/") -> Iterator[str]:
+    def list_common_prefixes_with_delimeter(self, prefix: str, delimiter: str = "/") -> Iterator[str]:
         """Implementation using S3 Inventory manifest data."""
         prefix_set: Set[str] = set()
 
@@ -211,11 +218,11 @@ class S3InventoryLister(JobAttachmentsS3BucketLister):
                 yield (prefix, object)
 
     def _get_s3_inventory_manifest(self) -> List[S3ObjectData]:
-        s3: BaseClient = get_s3_client(session=self.boto3_session)
+        self._check_manifest_file_size_fits_into_memory()
 
         try:
-            response: Dict[str, Any] = s3.get_object(
-                Bucket=self.s3_settings.s3BucketName, Key=self.s3_inventory_manifest_key
+            response: Dict[str, Any] = self.s3_client.get_object(
+                Bucket=self.s3_settings.s3BucketName, Key=self.job_attachments_file_key
             )
 
             # S3 inventory manifests are compressed (.gz)
@@ -227,10 +234,13 @@ class S3InventoryLister(JobAttachmentsS3BucketLister):
             csv_reader: Iterator[List[str]] = csv.reader(csv_file)
 
             return [
+                # Row: (bucket_name, object key, object size, last modified date, etag)
                 S3ObjectData(
                     key=row[1],
                     size=int(row[2]),
-                    last_modified=datetime.strptime(row[3], "%Y-%m-%dT%H:%M:%S.%fZ").replace(tzinfo=timezone.utc),
+                    last_modified=datetime.strptime(row[3], "%Y-%m-%dT%H:%M:%S.%fZ").replace(
+                        tzinfo=timezone.utc
+                    ),
                     etag=row[4],
                 )
                 for row in csv_reader
@@ -243,3 +253,24 @@ class S3InventoryLister(JobAttachmentsS3BucketLister):
             raise JobAttachmentsS3BucketListerError(
                 f"Failed to load S3 Inventory manifest into memory: {str(err)}"
             ) from err
+    
+    def _check_manifest_file_size_fits_into_memory(self) -> None:
+        """
+        Check if the manifest file is too large to be loaded into memory.
+
+        Raises:
+            JobAttachmentsS3BucketListerError: if inventory manifest is too large to fit in memory
+        """
+        response: Dict[str, Any] = self.s3_client.head_object(
+            Bucket=self.s3_settings.s3BucketName, Key=self.job_attachments_file_key
+        )
+
+        print(response)
+
+        # All values in bytes
+        compressed_file_size: int = int(response["ContentLength"])
+        estimated_uncompressed_size: int = compressed_file_size * GZIP_UNCOMPRESSED_TO_COMPRESSED_RATIO
+        available_memory_with_threshold: int = psutil.virtual_memory().available * MEMORY_THRESHOLD
+        
+        if estimated_uncompressed_size >= available_memory_with_threshold:
+            raise JobAttachmentsS3BucketListerError("S3 Inventory manifest is too large for available memory")

@@ -9,12 +9,16 @@ from botocore.client import BaseClient
 
 from .retention_record_handler import RetentionRecordHandler
 from .job_attachments_sweeper import JobAttachmentsSweeper
+from ..job_attachment_object_fetcher_strategy import (
+    JobAttachmentObjectFetcherFactory,
+)
 from ..job_attachments_s3_bucket_lister import S3PaginationLister, S3InventoryLister
 from ..models import (
     AssetHash,
     FarmQueueJobTriple,
     JobAttachmentS3Settings,
     RetentionRecord,
+    JobAttachmentFetchingStrategy
 )
 from ..manifest_handling import (
     _get_all_manifest_s3_keys_for_job,
@@ -41,7 +45,8 @@ def _initialize_dependencies(
     root_prefix: str,
     boto3_session: boto3.Session,
     role_arn: str,
-    s3_inventory_manifest_key: str,
+    job_attachments_file_key: str,
+    job_attachment_fetching_strategy: JobAttachmentFetchingStrategy 
 ) -> SweeperDependencies:
     """
     Initialize all required services and components for the bucket sweeper.
@@ -54,7 +59,7 @@ def _initialize_dependencies(
             within the bucket.
         boto3_session: boto3 session
         role_arn: s3 batch operations batch tagging role arn
-        s3_inventory_manifest_key: s3 inventory manifest key to list from
+        job_attachments_file_key: s3 inventory manifest key to list from
 
     Returns:
         SweeperComponents: Container object with initialized boto3 session, sweeper
@@ -75,16 +80,12 @@ def _initialize_dependencies(
         storage_file_path=working_directory / "storage_file.json"
     )
 
-    if s3_inventory_manifest_key:
-        job_attachments_object_fetcher: S3InventoryLister = S3InventoryLister(
-            boto3_session=boto3_session,
-            s3_settings=job_attachment_s3_settings,
-            s3_inventory_manifest_key=s3_inventory_manifest_key,
-        )
-    else:
-        job_attachments_object_fetcher: S3PaginationLister = S3PaginationLister(
-            boto3_session=boto3_session, settings=job_attachment_s3_settings
-        )
+    job_attachments_object_fetcher: JobAttachmentS3BucketLister = JobAttachmentObjectFetcherFactory.create(
+        strategy=job_attachment_fetching_strategy,
+        boto3_session=boto3_session,
+        settings=job_attachment_s3_settings,
+        job_attachments_file_key=job_attachments_file_key,
+    )
 
     sweeper: JobAttachmentsSweeper = JobAttachmentsSweeper(
         s3_client=s3_client,

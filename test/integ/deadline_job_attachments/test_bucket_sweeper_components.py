@@ -16,7 +16,7 @@ from deadline.job_attachments.bucket_sweeper.bucket_sweeper_components import (
     _create_deletion_batch_job,
 )
 from deadline.job_attachments.bucket_sweeper.job_attachments_sweeper import JobAttachmentsSweeper
-from deadline.job_attachments.models import FarmQueueJobTriple
+from deadline.job_attachments.models import FarmQueueJobTriple, JobAttachmentFetchingStrategy
 
 
 @pytest.fixture
@@ -54,7 +54,9 @@ def test_initialize_services(
         root_prefix="test-prefix",
         boto3_session=mock_boto3_session,
         role_arn="test-role-arn",
-        s3_inventory_manifest_key="",
+        job_attachment_fetching_strategy=JobAttachmentFetchingStrategy.PAGINATION,
+        job_attachments_file_key="",
+        
     )
 
     assert isinstance(components, SweeperDependencies)

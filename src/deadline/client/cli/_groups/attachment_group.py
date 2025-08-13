@@ -22,7 +22,7 @@ from deadline.client import api
 from deadline.job_attachments import api as attachment_api
 from deadline.job_attachments._aws.deadline import get_queue
 from deadline.job_attachments.exceptions import MissingJobAttachmentSettingsError
-from deadline.job_attachments.models import FileConflictResolution, JobAttachmentS3Settings
+from deadline.job_attachments.models import FileConflictResolution, JobAttachmentS3Settings, JobAttachmentFetchingStrategy
 
 
 @click.group(name="attachment")
@@ -228,18 +228,27 @@ def attachment_upload(
     help="Base folder path within the S3 bucket to start cleanup from (e.g., 'DeadlineCloud')",
 )
 @click.option(
-    "--retention-days",
-    help="Number of days to keep files. Files accessed within this many days will be preserved, older unused files will be deleted (e.g., 30)",
-)
-@click.option(
     "--role-arn",
     required=False,
     help="Role ARN for executing S3 batch operations tagging job",
 )
 @click.option(
-    "--s3-inventory-manifest-key",
+    "--retention-days",
+    help="Number of days to keep files. Files accessed within this many days will be preserved, older unused files will be deleted (e.g., 30)",
+)
+@click.option(
+    "--job-attachment-fetching-strategy",
+    type=click.Choice(
+        [JobAttachmentFetchingStrategy.PAGINATION, JobAttachmentFetchingStrategy.INVENTORY],
+        case_sensitive=False,
+    ),
     required=False,
-    help="S3 object key of the S3 Inventory manifest to use for cleanup. If not provided, cleanup will use pagination instead.",
+    help="Strategy for fetching job attachments from S3"
+)
+@click.option(
+    "--job-attachments-file-key",
+    required=False,
+    help="S3 object key to list objects from (required for listing from S3 Inventory manifest)",
 )
 @click.option(
     "--dry-run",
@@ -255,7 +264,8 @@ def cleanup(
     role_arn: str,
     dry_run: bool,
     json: bool,
-    s3_inventory_manifest_key: str = "",
+    job_attachment_fetching_strategy: JobAttachmentFetchingStrategy,
+    job_attachments_file_key: str = "",
     retention_days: int = 120,
     **args,
 ):
@@ -272,6 +282,10 @@ def cleanup(
         role_arn: str = config_file.get_setting("defaults.s3_batch_job_role_arn", config=config)
     else:
         config_file.set_setting("defaults.s3_batch_job_role_arn", role_arn, config=config)
+    
+    # Use pagination if no strategy is provided
+    if not job_attachment_fetching_strategy:
+        job_attachment_fetching_strategy = JobAttachmentFetchingStrategy.PAGINATION
 
     attachment_api._attachment_sweep(
         bucket_name=bucket_name,
@@ -280,6 +294,7 @@ def cleanup(
         s3_batch_job_arn_role=role_arn,
         retention_days=retention_days,
         dry_run=dry_run,
-        s3_inventory_manifest_key=s3_inventory_manifest_key,
+        job_attachment_fetching_strategy=job_attachment_fetching_strategy,
+        job_attachments_file_key=job_attachments_file_key,
         logging_function_callback=logger.echo,
     )

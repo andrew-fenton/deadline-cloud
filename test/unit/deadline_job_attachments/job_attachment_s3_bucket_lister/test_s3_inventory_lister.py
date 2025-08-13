@@ -62,7 +62,7 @@ class TestS3InventoryLister:
             return S3InventoryLister(
                 boto3_session=mock_session,
                 s3_settings=settings,
-                s3_inventory_manifest_key="test-manifest.csv.gz",
+                job_attachments_file_key="test-manifest.csv.gz",
             )
 
     def test_list_common_prefixes_with_delimiter_happy_path(
@@ -131,10 +131,13 @@ class TestS3InventoryLister:
         assert obj2.key == "queue-2/job-1/file3.txt"
 
     @patch("deadline.job_attachments.job_attachments_s3_bucket_lister.get_s3_client")
+    @patch("deadline.job_attachments.job_attachments_s3_bucket_lister.S3InventoryLister._check_manifest_file_size_fits_into_memory")
     def test_get_s3_inventory_manifest_happy_path(
-        self, mock_get_s3_client: Mock, mock_session: Mock, settings: JobAttachmentS3Settings
+        self, mock_memory_check: Mock, mock_get_s3_client: Mock, mock_session: Mock, settings: JobAttachmentS3Settings
     ) -> None:
         """Test successful manifest download, decompression, and parsing"""
+        mock_memory_check.return_value = None
+
         mock_s3_client: Mock = Mock()
         mock_get_s3_client.return_value = mock_s3_client
 
@@ -147,7 +150,7 @@ class TestS3InventoryLister:
         lister: S3InventoryLister = S3InventoryLister(
             boto3_session=mock_session,
             s3_settings=settings,
-            s3_inventory_manifest_key="test-manifest.csv.gz",
+            job_attachments_file_key="test-manifest.csv.gz",
         )
 
         assert len(lister.manifest_data) == 2
@@ -171,10 +174,13 @@ class TestS3InventoryLister:
         )
 
     @patch("deadline.job_attachments.job_attachments_s3_bucket_lister.get_s3_client")
-    def test_get_s3_inventory_manifest_key_not_exists(
-        self, mock_get_s3_client: Mock, mock_session: Mock, settings: JobAttachmentS3Settings
+    @patch("deadline.job_attachments.job_attachments_s3_bucket_lister.S3InventoryLister._check_manifest_file_size_fits_into_memory")
+    def test_get_job_attachments_file_key_not_exists(
+        self, mock_memory_check: Mock, mock_get_s3_client: Mock, mock_session: Mock, settings: JobAttachmentS3Settings
     ) -> None:
         """Test that missing manifest key raises JobAttachmentsS3BucketListerError"""
+        mock_memory_check.return_value = None
+
         mock_s3_client: Mock = Mock()
         mock_get_s3_client.return_value = mock_s3_client
 
@@ -187,30 +193,32 @@ class TestS3InventoryLister:
             S3InventoryLister(
                 boto3_session=mock_session,
                 s3_settings=settings,
-                s3_inventory_manifest_key="non-existent-manifest.csv.gz",
+                job_attachments_file_key="non-existent-manifest.csv.gz",
             )
 
         assert "Failed to download S3 Inventory manifest from S3" in str(exc_info.value)
 
+    @patch("deadline.job_attachments.job_attachments_s3_bucket_lister.psutil")
     @patch("deadline.job_attachments.job_attachments_s3_bucket_lister.get_s3_client")
-    def test_get_s3_inventory_manifest_memory_error(
-        self, mock_get_s3_client: Mock, mock_session: Mock, settings: JobAttachmentS3Settings
+    def test_check_manifest_file_size_fits_into_memory_too_large(
+        self, mock_get_s3_client: Mock, mock_psutil: Mock, mock_session: Mock, settings: JobAttachmentS3Settings
     ) -> None:
-        """Test that memory error during manifest processing raises JobAttachmentsS3BucketListerError"""
+        """Test that manifest file size check raises error when file is too large for available memory"""
         mock_s3_client: Mock = Mock()
         mock_get_s3_client.return_value = mock_s3_client
 
-        # Create a mock response that will cause MemoryError when read
-        mock_body: Mock = Mock()
-        mock_body.read.side_effect = MemoryError("Not enough memory")
-        mock_response: Dict[str, Mock] = {"Body": mock_body}
-        mock_s3_client.get_object.return_value = mock_response
+        mock_virtual_memory: Mock = Mock()
+        mock_virtual_memory.available = 100
+        mock_psutil.virtual_memory.return_value = mock_virtual_memory
 
-        with pytest.raises(JobAttachmentsS3BucketListerError) as exc_info:
+        large_compressed_size = 200
+        mock_s3_client.head_object.return_value = {"ContentLength": large_compressed_size}
+
+        with pytest.raises(JobAttachmentsS3BucketListerError) as error:
             S3InventoryLister(
                 boto3_session=mock_session,
                 s3_settings=settings,
-                s3_inventory_manifest_key="large-manifest.csv.gz",
+                job_attachments_file_key="large-manifest.csv.gz",
             )
 
-        assert "Failed to load S3 Inventory manifest into memory" in str(exc_info.value)
+        assert "S3 Inventory manifest is too large for available memory" in str(error)
