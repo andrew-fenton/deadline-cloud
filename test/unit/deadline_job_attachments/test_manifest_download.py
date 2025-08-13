@@ -124,14 +124,14 @@ class TestManifestDownload:
         """Test download job manifests fails fast"""
         mock_session: MagicMock = MagicMock()
         mock_s3_client: MagicMock = MagicMock()
-        
+
         def selective_download_error(bucket_name, key, local_path):
             # Only raise error for a single manifest
             if "step-1/task-1/section-action/manifest_output" in key:
                 raise IOError()
             # For other manifests, simulate successful download by doing nothing
             return None
-        
+
         mock_s3_client.download_file.side_effect = selective_download_error
 
         manifest_keys: List[str] = [

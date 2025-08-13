@@ -22,7 +22,11 @@ from deadline.client import api
 from deadline.job_attachments import api as attachment_api
 from deadline.job_attachments._aws.deadline import get_queue
 from deadline.job_attachments.exceptions import MissingJobAttachmentSettingsError
-from deadline.job_attachments.models import FileConflictResolution, JobAttachmentS3Settings
+from deadline.job_attachments.models import (
+    FileConflictResolution,
+    JobAttachmentS3Settings,
+    JobAttachmentFetchingStrategy,
+)
 
 
 @click.group(name="attachment")
@@ -221,20 +225,40 @@ def attachment_upload(
 )
 @click.option(
     "--bucket-name",
+    required=True,
     help="Name of the S3 bucket where cleanup will be performed (e.g., 'my-attachment-bucket')",
 )
 @click.option(
     "--root-prefix",
+    required=True,
     help="Base folder path within the S3 bucket to start cleanup from (e.g., 'DeadlineCloud')",
 )
 @click.option(
-    "--retention-days",
-    help="Number of days to keep files. Files accessed within this many days will be preserved, older unused files will be deleted (e.g., 30)",
+    "--profile",
+    required=False,
+    help="The AWS profile to use for interacting with Job Attachments S3 bucket.",
 )
 @click.option(
-    "--role-arn",
+    "--retention-days",
+    default=120,
     required=False,
-    help="Role ARN for executing S3 batch operations tagging job",
+    help="Number of days to keep files. Files used within this many days will be preserved, older unused files will be deleted (e.g., 30)",
+)
+@click.option(
+    "--job-attachment-fetching-strategy",
+    type=click.Choice(
+        [JobAttachmentFetchingStrategy.PAGINATION, JobAttachmentFetchingStrategy.INVENTORY],
+        case_sensitive=False,
+    ),
+    default=JobAttachmentFetchingStrategy.PAGINATION,
+    required=False,
+    help="Strategy for fetching job attachments from S3 (default: pagination)",
+)
+@click.option(
+    "--job-attachments-file-key",
+    default="",
+    required=False,
+    help="S3 object key to list objects from (required for listing from S3 Inventory manifest)",
 )
 @click.option(
     "--dry-run",
@@ -247,10 +271,11 @@ def attachment_upload(
 def cleanup(
     bucket_name: str,
     root_prefix: str,
-    role_arn: str,
+    retention_days: int,
+    job_attachment_fetching_strategy: JobAttachmentFetchingStrategy,
+    job_attachments_file_key: str,
     dry_run: bool,
     json: bool,
-    retention_days: int = 120,
     **args,
 ):
     """
@@ -262,10 +287,9 @@ def cleanup(
     retention_days: int = int(retention_days)
     boto3_session: boto3.Session = api.get_boto3_session(config=config)
 
+    role_arn: str = config_file.get_setting("defaults.s3_batch_job_role_arn", config=config)
     if not role_arn:
-        role_arn: str = config_file.get_setting("defaults.s3_batch_job_role_arn", config=config)
-    else:
-        config_file.set_setting("defaults.s3_batch_job_role_arn", role_arn, config=config)
+        raise MissingJobAttachmentSettingsError("Missing S3 batch operation role arn")
 
     attachment_api._attachment_sweep(
         bucket_name=bucket_name,
@@ -274,5 +298,7 @@ def cleanup(
         s3_batch_job_arn_role=role_arn,
         retention_days=retention_days,
         dry_run=dry_run,
+        job_attachment_fetching_strategy=job_attachment_fetching_strategy,
+        job_attachments_file_key=job_attachments_file_key,
         logging_function_callback=logger.echo,
     )

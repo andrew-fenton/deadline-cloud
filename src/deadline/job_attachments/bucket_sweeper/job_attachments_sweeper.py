@@ -120,11 +120,10 @@ class JobAttachmentsSweeper:
 
         try:
             for (
-                common_prefix_data
+                common_prefix
             ) in self.job_attachments_s3_bucket_lister.list_common_prefixes_with_delimeter(
                 prefix=prefix
             ):
-                common_prefix: str = common_prefix_data.get("Prefix", "")
                 split_common_prefix: List[str] = common_prefix.split("/")
 
                 if len(split_common_prefix) < 2:

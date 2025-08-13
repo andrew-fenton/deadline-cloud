@@ -530,3 +530,10 @@ class FarmQueueJobTriple(NamedTuple):
     farm_id: str
     queue_id: str
     job_id: str
+
+
+class JobAttachmentFetchingStrategy(Enum):
+    """Fetching strategy for listing job attachments from S3"""
+
+    PAGINATION = "pagination"
+    INVENTORY = "inventory"

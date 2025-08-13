@@ -33,6 +33,7 @@ from deadline.job_attachments.models import (
     Attachments,
     ManifestProperties,
     PathFormat,
+    JobAttachmentFetchingStrategy,
 )
 from deadline.job_attachments.progress_tracker import SummaryStatistics
 from deadline.job_attachments._utils import (
@@ -1694,6 +1695,7 @@ def test_attachment_sweep(
         boto3_session=boto3_session,
         s3_batch_job_arn_role=s3_batch_job_arn_role,
         retention_days=1,
+        job_attachment_fetching_strategy=JobAttachmentFetchingStrategy.PAGINATION,
     )
 
     # Note: The actual deletion happens via S3 batch job, so we mainly verify
