@@ -289,7 +289,7 @@ def cleanup(
 
     role_arn: str = config_file.get_setting("defaults.s3_batch_job_role_arn", config=config)
     if not role_arn:
-        raise MissingJobAttachmentSettingsError("Profile missing S3 batch operation role arn")
+        raise MissingJobAttachmentSettingsError("Missing S3 batch operation role arn")
 
     attachment_api._attachment_sweep(
         bucket_name=bucket_name,
