@@ -284,7 +284,6 @@ def cleanup(
     config = _apply_cli_options_to_config(**args)
     logger: ClickLogger = ClickLogger(is_json=json)
 
-    retention_days: int = int(retention_days)
     boto3_session: boto3.Session = api.get_boto3_session(config=config)
 
     role_arn: str = config_file.get_setting("defaults.s3_batch_job_role_arn", config=config)
