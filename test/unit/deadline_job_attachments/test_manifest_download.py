@@ -40,12 +40,12 @@ class TestManifestDownload:
         mock_s3_client.download_file.assert_any_call(
             "deadline-bucket",
             "DeadlineCloud/Manifests/farm-123/queue-456/Inputs/abc123/manifest_input",
-            f"{download_directory}/abc123_manifest_input",
+            str(download_directory / "abc123_manifest_input"),
         )
         mock_s3_client.download_file.assert_any_call(
             "deadline-bucket",
             "DeadlineCloud/Manifests/farm-123/queue-456/job-789/step-1/task-1/section-action/manifest_output",
-            f"{download_directory}/section-action_manifest_output",
+            str(download_directory / "section-action_manifest_output"),
         )
 
     def test_download_job_manifests_malformed_key(self, tmp_path: Path):

@@ -238,7 +238,7 @@ class JobAttachmentSweeper:
             csv_formatted_list.append([self.bucket_name, obj_key])
 
         try:
-            with open(str(file_path), "w") as file:
+            with open(str(file_path), "w", newline="") as file:
                 writer = csv.writer(file)
                 writer.writerows(csv_formatted_list)
         except Exception as e:
