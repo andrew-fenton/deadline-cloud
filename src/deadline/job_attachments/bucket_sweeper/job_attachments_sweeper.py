@@ -4,6 +4,7 @@ import csv
 import boto3
 
 from datetime import datetime
+from pathlib import Path
 from typing import List, Dict, Any, Set
 from botocore.exceptions import BotoCoreError
 from botocore.client import BaseClient
@@ -217,7 +218,7 @@ class JobAttachmentsSweeper:
 
         return delete_list
 
-    def _create_tag_manifest(self, file_path: str, delete_list: List[str]) -> None:
+    def _create_tag_manifest(self, file_path: Path, delete_list: List[str]) -> None:
         """
         Creates a CSV manifest file containing object keys to be deleted and writes it to
         the specified path on disk.
@@ -225,7 +226,7 @@ class JobAttachmentsSweeper:
         Each row in the CSV contains two columns: bucket name and object key.
 
         Args:
-            write_path (str): File path where the manifest file will be created
+            write_path (Path): File path where the manifest file will be created
             delete_list (List[str]): List of object keys to be included in the manifest
 
         Raises:
@@ -237,27 +238,25 @@ class JobAttachmentsSweeper:
             csv_formatted_list.append([self.bucket_name, obj_key])
 
         try:
-            with open(file_path, "w") as file:
+            with open(str(file_path), "w") as file:
                 writer = csv.writer(file)
                 writer.writerows(csv_formatted_list)
         except Exception as e:
             raise JobAttachmentsSweeperError(message=f"Failed to create tag manifest: {str(e)}")
 
-        return file_path
-
-    def _upload_tag_manifest(self, manifest_path: str, object_key: str) -> None:
+    def _upload_tag_manifest(self, manifest_path: Path, object_key: str) -> None:
         """
         Upload CSV manifest to S3. Overwrites existing manifest if already present.
 
         Args:
-            manifest_path (str): Local path to the manifest file
+            manifest_path (Path): Local path to the manifest file
             object_key (str): S3 object key for the uploaded manifest
 
         Raises:
             JobAttachmentS3BotoCoreError: If any errors occur during the upload process
         """
         try:
-            self.s3.upload_file(manifest_path, self.bucket_name, object_key)
+            self.s3.upload_file(str(manifest_path), self.bucket_name, object_key)
         except BotoCoreError as e:
             raise JobAttachmentS3BotoCoreError(
                 action="uploading bucket sweeper tag manifest", error_details=str(e)

@@ -307,10 +307,10 @@ class S3InventoryLister(JobAttachmentsS3BucketLister):
     def _get_s3_inventory_manifest(self) -> List[S3ObjectData]:
         """
         Downloads and parses S3 inventory manifest file, returning object metadata.
-        
+
         Returns:
             List of S3ObjectData containing key, size, last_modified, and etag for each object.
-            
+
         Raises:
             JobAttachmentsS3BucketListerError: If download fails or manifest cannot be loaded into memory.
         """

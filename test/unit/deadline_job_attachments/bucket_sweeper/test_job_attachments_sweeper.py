@@ -1,7 +1,6 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 
 import pytest
-import os
 import csv
 
 from datetime import datetime
@@ -106,7 +105,7 @@ class TestJobAttachmentsSweeper:
             RetentionRecord(queue_id="queue-3", job_id="job-3", s3_object_key="key-3"),
         ]
 
-        processor.retention_record_handler.get_retention_records.return_value = mock_records
+        processor.retention_record_handler.get_retention_records = Mock(return_value=mock_records)
 
         result: Set[str] = processor.get_attachments_to_retain(queue_job_id_map)
 
@@ -127,7 +126,7 @@ class TestJobAttachmentsSweeper:
             RetentionRecord(queue_id="queue-1", job_id="job-2", s3_object_key="key-2"),
         ]
 
-        processor.retention_record_handler.get_retention_records.return_value = mock_records
+        processor.retention_record_handler.get_retention_records = Mock(return_value=mock_records)
 
         result: Set[str] = processor.get_attachments_to_retain(queue_job_id_map)
 
@@ -138,7 +137,7 @@ class TestJobAttachmentsSweeper:
         """Tests behavior with empty queue job map."""
         queue_job_id_map: Dict[str, List[str]] = {}
 
-        processor.retention_record_handler.get_retention_records.return_value = []
+        processor.retention_record_handler.get_retention_records = Mock(return_value=[])
 
         result: Set[str] = processor.get_attachments_to_retain(queue_job_id_map)
 
@@ -152,8 +151,8 @@ class TestJobAttachmentsSweeper:
         queue_job_id_map: Dict[str, List[str]] = {"queue-1": ["job-1"]}
 
         error_message: str = "Failed to retrieve records"
-        processor.retention_record_handler.get_retention_records.side_effect = (
-            RetentionRecordHandlerError(error_message)
+        processor.retention_record_handler.get_retention_records = Mock(
+            side_effect=RetentionRecordHandlerError(error_message)
         )
 
         with pytest.raises(JobAttachmentsSweeperError) as err:
@@ -202,7 +201,9 @@ class TestJobAttachmentsSweeper:
     def test_get_ids_from_common_prefixes_happy_path(self, processor: JobAttachmentsSweeper):
         """Test successfully getting IDs from common prefixes."""
         mock_prefixes = ["test/123/", "test/456/", "test/789/"]
-        processor.job_attachments_s3_bucket_lister.list_common_prefixes_with_delimeter.return_value = mock_prefixes
+        processor.job_attachments_s3_bucket_lister.list_common_prefixes_with_delimeter = Mock(
+            return_value=mock_prefixes
+        )
 
         result = processor._get_ids_from_common_prefixes("test/")
 
@@ -213,7 +214,9 @@ class TestJobAttachmentsSweeper:
 
     def test_get_ids_from_common_prefixes_none_exist(self, processor: JobAttachmentsSweeper):
         """Test getting IDs when no prefixes exist."""
-        processor.job_attachments_s3_bucket_lister.list_common_prefixes_with_delimeter.return_value = []
+        processor.job_attachments_s3_bucket_lister.list_common_prefixes_with_delimeter = Mock(
+            return_value=[]
+        )
 
         result = processor._get_ids_from_common_prefixes("test/")
 
@@ -225,8 +228,8 @@ class TestJobAttachmentsSweeper:
     def test_get_ids_from_common_prefixes_lister_error(self, processor: JobAttachmentsSweeper):
         """Test getting IDs when lister throws an error."""
         error_message = "Failed to list common prefixes"
-        processor.job_attachments_s3_bucket_lister.list_common_prefixes_with_delimeter.side_effect = JobAttachmentsS3BucketListerError(
-            error_message
+        processor.job_attachments_s3_bucket_lister.list_common_prefixes_with_delimeter = Mock(
+            side_effect=JobAttachmentsS3BucketListerError(error_message)
         )
 
         with pytest.raises(JobAttachmentsSweeperError) as err:
@@ -247,7 +250,9 @@ class TestJobAttachmentsSweeper:
                 key="retain_this", size=200, last_modified=datetime(2025, 1, 3), etag="etag2"
             ),
         ]
-        processor.job_attachments_s3_bucket_lister.list_job_attachments.return_value = mock_objects
+        processor.job_attachments_s3_bucket_lister.list_job_attachments = Mock(
+            return_value=mock_objects
+        )
 
         retention_datetime: datetime = datetime(2025, 1, 2)
         result: List[str] = processor.get_attachments_to_delete(
@@ -273,7 +278,9 @@ class TestJobAttachmentsSweeper:
                 key="retain_this", size=100, last_modified=datetime(2025, 1, 1), etag="etag1"
             ),
         ]
-        processor.job_attachments_s3_bucket_lister.list_job_attachments.return_value = mock_objects
+        processor.job_attachments_s3_bucket_lister.list_job_attachments = Mock(
+            return_value=mock_objects
+        )
 
         retention_datetime: datetime = datetime(2025, 1, 2)
         result: List[str] = processor.get_attachments_to_delete(
@@ -290,8 +297,8 @@ class TestJobAttachmentsSweeper:
     def test_get_attachments_to_delete_handles_lister_error(self, processor: JobAttachmentsSweeper):
         """Test that the function properly handles errors from the lister."""
         error_message: str = "Error with listing function"
-        processor.job_attachments_s3_bucket_lister.list_job_attachments.side_effect = (
-            JobAttachmentsS3BucketListerError(error_message)
+        processor.job_attachments_s3_bucket_lister.list_job_attachments = Mock(
+            side_effect=JobAttachmentsS3BucketListerError(error_message)
         )
 
         retention_datetime: datetime = datetime(2025, 1, 2)
@@ -315,10 +322,10 @@ class TestJobAttachmentsSweeper:
 
     def test_create_tag_manifest_empty_list(self, processor: JobAttachmentsSweeper, test_dir: Path):
         """Test creating a tag manifest with an empty delete list."""
-        test_file_path = test_dir / "empty_manifest.csv"
-        manifest_path: str = processor._create_tag_manifest(str(test_file_path), [])
+        test_file_path: Path = test_dir / "empty_manifest.csv"
+        processor._create_tag_manifest(str(test_file_path), [])
 
-        with open(manifest_path, "r") as file:
+        with open(str(test_file_path), "r") as file:
             assert file.read() == ""
 
     def test_create_tag_manifest_io_error(
@@ -349,13 +356,13 @@ class TestJobAttachmentsSweeper:
             "DeadlineCloud/Data/hash.xx128",
         ]
 
-        test_file_path = test_dir / "tag_manifest.csv"
-        manifest_path: str = processor._create_tag_manifest(str(test_file_path), delete_list)
+        test_file_path: Path = test_dir / "tag_manifest.csv"
+        processor._create_tag_manifest(str(test_file_path), delete_list)
 
-        assert os.path.exists(manifest_path)
+        assert test_file_path.exists()
 
         # Validate CSV output
-        with open(manifest_path, "r") as file:
+        with open(str(test_file_path), "r") as file:
             reader = csv.reader(file)
             rows: List[List[str]] = list(reader)
 
