@@ -195,7 +195,7 @@ class BucketSweeperError(Exception):
         super().__init__(message)
 
 
-class JobAttachmentsSweeperError(BucketSweeperError):
+class JobAttachmentSweeperError(BucketSweeperError):
     """
     Exception for manifest processing in bucket sweeper.
     """
@@ -209,7 +209,7 @@ class RetentionRecordHandlerError(Exception):
         super().__init__(message)
 
 
-class JobAttachmentsS3BucketListerError(JobAttachmentsError):
+class JobAttachmentObjectFetcherError(JobAttachmentsError):
     """
     Exception for errors related to listing job attachments.
     """

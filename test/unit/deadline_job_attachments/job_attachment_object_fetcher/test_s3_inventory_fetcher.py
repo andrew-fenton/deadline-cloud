@@ -11,12 +11,12 @@ from datetime import datetime
 from botocore.exceptions import ClientError
 from datetime import timezone
 
-from deadline.job_attachments.exceptions import JobAttachmentsS3BucketListerError
-from deadline.job_attachments.job_attachments_s3_bucket_lister import S3InventoryLister
+from deadline.job_attachments.exceptions import JobAttachmentObjectFetcherError
+from deadline.job_attachments.job_attachment_object_fetcher import S3InventoryFetcher
 from deadline.job_attachments.models import JobAttachmentS3Settings, S3ObjectData
 
 
-class TestS3InventoryLister:
+class TestS3InventoryFetcher:
     @pytest.fixture
     def mock_session(self) -> Mock:
         session: Mock = Mock(spec=boto3.Session)
@@ -55,18 +55,18 @@ class TestS3InventoryLister:
         mock_session: Mock,
         settings: JobAttachmentS3Settings,
         sample_manifest_data: List[S3ObjectData],
-    ) -> S3InventoryLister:
+    ) -> S3InventoryFetcher:
         with patch.object(
-            S3InventoryLister, "_get_s3_inventory_manifest", return_value=sample_manifest_data
+            S3InventoryFetcher, "_get_s3_inventory_manifest", return_value=sample_manifest_data
         ):
-            return S3InventoryLister(
+            return S3InventoryFetcher(
                 boto3_session=mock_session,
                 s3_settings=settings,
                 job_attachments_file_key="test-manifest.csv.gz",
             )
 
     def test_list_common_prefixes_with_delimiter_happy_path(
-        self, inventory_lister_with_mock_data: S3InventoryLister
+        self, inventory_lister_with_mock_data: S3InventoryFetcher
     ):
         """Test listing common prefixes with populated manifest data returns all common prefixes"""
         result: List[str] = list(
@@ -78,7 +78,7 @@ class TestS3InventoryLister:
 
     def test_list_job_attachments_happy_path_matching_prefix(
         self,
-        inventory_lister_with_mock_data: S3InventoryLister,
+        inventory_lister_with_mock_data: S3InventoryFetcher,
         sample_manifest_data: List[S3ObjectData],
     ) -> None:
         """Test listing job attachments with matching prefix returns only matching objects"""
@@ -93,7 +93,7 @@ class TestS3InventoryLister:
 
     def test_list_job_attachments_no_prefix_returns_all(
         self,
-        inventory_lister_with_mock_data: S3InventoryLister,
+        inventory_lister_with_mock_data: S3InventoryFetcher,
         sample_manifest_data: List[S3ObjectData],
     ) -> None:
         """Test listing job attachments with no prefix returns all objects"""
@@ -109,7 +109,7 @@ class TestS3InventoryLister:
         assert result_keys == expected_keys
 
     def test_list_job_attachments_with_prefixes_happy_path(
-        self, inventory_lister_with_mock_data: S3InventoryLister
+        self, inventory_lister_with_mock_data: S3InventoryFetcher
     ) -> None:
         """Test listing job attachments with multiple prefixes returns objects with their prefixes"""
         prefixes: List[str] = ["queue-1/job-1/", "queue-2/"]
@@ -130,9 +130,9 @@ class TestS3InventoryLister:
         assert prefix2 == "queue-2/"
         assert obj2.key == "queue-2/job-1/file3.txt"
 
-    @patch("deadline.job_attachments.job_attachments_s3_bucket_lister.get_s3_client")
+    @patch("deadline.job_attachments.job_attachment_object_fetcher.get_s3_client")
     @patch(
-        "deadline.job_attachments.job_attachments_s3_bucket_lister.S3InventoryLister._check_manifest_file_size_fits_into_memory"
+        "deadline.job_attachments.job_attachment_object_fetcher.S3InventoryFetcher._check_manifest_file_size_fits_into_memory"
     )
     def test_get_s3_inventory_manifest_happy_path(
         self,
@@ -153,7 +153,7 @@ class TestS3InventoryLister:
 
         mock_s3_client.get_object.return_value = {"Body": io.BytesIO(compressed_data)}
 
-        lister: S3InventoryLister = S3InventoryLister(
+        lister: S3InventoryFetcher = S3InventoryFetcher(
             boto3_session=mock_session,
             s3_settings=settings,
             job_attachments_file_key="test-manifest.csv.gz",
@@ -179,9 +179,9 @@ class TestS3InventoryLister:
             Bucket="test-bucket", Key="test-manifest.csv.gz"
         )
 
-    @patch("deadline.job_attachments.job_attachments_s3_bucket_lister.get_s3_client")
+    @patch("deadline.job_attachments.job_attachment_object_fetcher.get_s3_client")
     @patch(
-        "deadline.job_attachments.job_attachments_s3_bucket_lister.S3InventoryLister._check_manifest_file_size_fits_into_memory"
+        "deadline.job_attachments.job_attachment_object_fetcher.S3InventoryFetcher._check_manifest_file_size_fits_into_memory"
     )
     def test_get_job_attachments_file_key_not_exists(
         self,
@@ -190,7 +190,7 @@ class TestS3InventoryLister:
         mock_session: Mock,
         settings: JobAttachmentS3Settings,
     ) -> None:
-        """Test that missing manifest key raises JobAttachmentsS3BucketListerError"""
+        """Test that missing manifest key raises JobAttachmentObjectFetcherError"""
         mock_memory_check.return_value = None
 
         mock_s3_client: Mock = Mock()
@@ -201,8 +201,8 @@ class TestS3InventoryLister:
             operation_name="GetObject",
         )
 
-        with pytest.raises(JobAttachmentsS3BucketListerError) as exc_info:
-            S3InventoryLister(
+        with pytest.raises(JobAttachmentObjectFetcherError) as exc_info:
+            S3InventoryFetcher(
                 boto3_session=mock_session,
                 s3_settings=settings,
                 job_attachments_file_key="non-existent-manifest.csv.gz",
@@ -210,8 +210,8 @@ class TestS3InventoryLister:
 
         assert "Failed to download S3 Inventory manifest from S3" in str(exc_info.value)
 
-    @patch("deadline.job_attachments.job_attachments_s3_bucket_lister.psutil")
-    @patch("deadline.job_attachments.job_attachments_s3_bucket_lister.get_s3_client")
+    @patch("deadline.job_attachments.job_attachment_object_fetcher.psutil")
+    @patch("deadline.job_attachments.job_attachment_object_fetcher.get_s3_client")
     def test_check_manifest_file_size_fits_into_memory_too_large(
         self,
         mock_get_s3_client: Mock,
@@ -230,8 +230,8 @@ class TestS3InventoryLister:
         large_compressed_size = 200
         mock_s3_client.head_object.return_value = {"ContentLength": large_compressed_size}
 
-        with pytest.raises(JobAttachmentsS3BucketListerError) as error:
-            S3InventoryLister(
+        with pytest.raises(JobAttachmentObjectFetcherError) as error:
+            S3InventoryFetcher(
                 boto3_session=mock_session,
                 s3_settings=settings,
                 job_attachments_file_key="large-manifest.csv.gz",

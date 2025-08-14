@@ -10,12 +10,12 @@ from botocore.paginate import Paginator
 from botocore.exceptions import ClientError
 from datetime import timezone
 
-from deadline.job_attachments.exceptions import JobAttachmentsS3BucketListerError
-from deadline.job_attachments.job_attachments_s3_bucket_lister import S3PaginationLister
+from deadline.job_attachments.exceptions import JobAttachmentObjectFetcherError
+from deadline.job_attachments.job_attachment_object_fetcher import S3PaginationFetcher
 from deadline.job_attachments.models import JobAttachmentS3Settings, S3ObjectData
 
 
-class TestS3PaginationLister:
+class TestS3PaginationFetcher:
     @pytest.fixture
     def mock_session(self) -> Mock:
         session = Mock(spec=boto3.Session)
@@ -55,7 +55,7 @@ class TestS3PaginationLister:
             }
         ]
 
-        lister: S3PaginationLister = S3PaginationLister(mock_session, settings)
+        lister: S3PaginationFetcher = S3PaginationFetcher(mock_session, settings)
         results = list(lister.list_common_prefixes_with_delimeter("queue-1/"))
 
         assert len(results) == 3
@@ -84,9 +84,9 @@ class TestS3PaginationLister:
             operation_name="ListObjectsV2",
         )
 
-        lister: S3PaginationLister = S3PaginationLister(mock_session, settings)
+        lister: S3PaginationFetcher = S3PaginationFetcher(mock_session, settings)
 
-        with pytest.raises(JobAttachmentsS3BucketListerError) as err:
+        with pytest.raises(JobAttachmentObjectFetcherError) as err:
             list(lister.list_common_prefixes_with_delimeter("queue-1/"))
 
         assert "Failed to list job attachments from S3" in str(err.value)
@@ -118,7 +118,7 @@ class TestS3PaginationLister:
             }
         ]
 
-        lister: S3PaginationLister = S3PaginationLister(mock_session, settings)
+        lister: S3PaginationFetcher = S3PaginationFetcher(mock_session, settings)
         results: List[S3ObjectData] = list(lister.list_job_attachments("DeadlineCloud/test/"))
 
         assert len(results) == 1
@@ -166,7 +166,7 @@ class TestS3PaginationLister:
             },
         ]
 
-        lister: S3PaginationLister = S3PaginationLister(mock_session, settings)
+        lister: S3PaginationFetcher = S3PaginationFetcher(mock_session, settings)
         results: List[S3ObjectData] = list(lister.list_job_attachments("DeadlineCloud/test/"))
 
         expected_result = [
@@ -199,7 +199,7 @@ class TestS3PaginationLister:
 
         mock_paginator.paginate.return_value = [{"Contents": []}]
 
-        lister: S3PaginationLister = S3PaginationLister(mock_session, settings)
+        lister: S3PaginationFetcher = S3PaginationFetcher(mock_session, settings)
         results: List[S3ObjectData] = list(lister.list_job_attachments("test/"))
 
         assert len(results) == 0
@@ -216,7 +216,7 @@ class TestS3PaginationLister:
 
         mock_paginator.paginate.return_value = [{}]  # No Contents key
 
-        lister: S3PaginationLister = S3PaginationLister(mock_session, settings)
+        lister: S3PaginationFetcher = S3PaginationFetcher(mock_session, settings)
         results: List[S3ObjectData] = list(lister.list_job_attachments("DeadlineCloud/test/"))
 
         assert len(results) == 0
@@ -236,9 +236,9 @@ class TestS3PaginationLister:
             operation_name="ListObjectsV2",
         )
 
-        lister: S3PaginationLister = S3PaginationLister(mock_session, settings)
+        lister: S3PaginationFetcher = S3PaginationFetcher(mock_session, settings)
 
-        with pytest.raises(JobAttachmentsS3BucketListerError) as err:
+        with pytest.raises(JobAttachmentObjectFetcherError) as err:
             list(lister.list_job_attachments("DeadlineCloud/test/"))
 
         assert "Failed to list job attachments from S3" in str(err.value)
@@ -249,7 +249,7 @@ class TestS3PaginationLister:
         settings: JobAttachmentS3Settings,
     ):
         """Test listing job attachments with empty prefixes list."""
-        lister = S3PaginationLister(mock_session, settings)
+        lister = S3PaginationFetcher(mock_session, settings)
 
         prefixes: List[str] = []
         results = list(lister.list_job_attachments_with_prefixes(prefixes))
@@ -262,7 +262,7 @@ class TestS3PaginationLister:
         settings: JobAttachmentS3Settings,
     ):
         """Test listing job attachments from multiple prefixes."""
-        lister = S3PaginationLister(mock_session, settings)
+        lister = S3PaginationFetcher(mock_session, settings)
 
         # Create mock objects for each prefix
         prefix1_objects = [
@@ -311,7 +311,7 @@ class TestS3PaginationLister:
         prefixes = ["DeadlineCloud/prefix1/", "DeadlineCloud/prefix2/", "DeadlineCloud/prefix3/"]
 
         with patch(
-            "deadline.job_attachments.job_attachments_s3_bucket_lister.S3PaginationLister.list_job_attachments"
+            "deadline.job_attachments.job_attachment_object_fetcher.S3PaginationFetcher.list_job_attachments"
         ) as mock_list_attachments:
             mock_list_attachments.side_effect = mock_list_job_attachments
             results = list(lister.list_job_attachments_with_prefixes(prefixes))

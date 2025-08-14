@@ -15,7 +15,7 @@ from deadline.job_attachments.bucket_sweeper.bucket_sweeper_components import (
     _determine_objects_to_delete,
     _create_deletion_batch_job,
 )
-from deadline.job_attachments.bucket_sweeper.job_attachments_sweeper import JobAttachmentsSweeper
+from deadline.job_attachments.bucket_sweeper.job_attachment_sweeper import JobAttachmentSweeper
 from deadline.job_attachments.models import FarmQueueJobTriple, JobAttachmentFetchingStrategy
 
 
@@ -33,7 +33,7 @@ def mock_get_session() -> MagicMock:
 
 @pytest.fixture
 def mock_sweeper() -> MagicMock:
-    return MagicMock(spec=JobAttachmentsSweeper)
+    return MagicMock(spec=JobAttachmentSweeper)
 
 
 @pytest.fixture
