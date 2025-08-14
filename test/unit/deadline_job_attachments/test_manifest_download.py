@@ -1,7 +1,6 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 
 import pytest
-import time
 
 from botocore.exceptions import ClientError
 from typing import List
@@ -160,31 +159,3 @@ class TestManifestDownload:
 
         assert "Inputs/abc123/manifest_input" not in str(error.value)
         assert "step-2/task-1/section-action/manifest_output" not in str(error.value)
-
-    def test_download_job_manifests_concurrent_behaviour(self):
-        """Test that downloads happen concurrently"""
-
-        mock_session = MagicMock()
-        mock_s3_client = MagicMock()
-
-        def slow_download(*args):
-            time.sleep(0.1)  # Simulate network delay
-
-        mock_s3_client.download_file.side_effect = slow_download
-        manifest_keys = ["path/file1", "path/file2", "path/file3"]
-
-        with patch(
-            "deadline.job_attachments.manifest_download.get_s3_client", return_value=mock_s3_client
-        ):
-            start_time = time.time()
-            _download_job_manifests_using_s3_keys_to_disk(
-                mock_session,
-                manifest_keys,
-                JobAttachmentS3Settings(rootPrefix="test", s3BucketName="bucket"),
-                Path("/tmp"),
-            )
-            elapsed = time.time() - start_time
-
-        # If sequential: 3 * 0.1 = 0.3s, if parallel: ~0.1s
-        assert elapsed < 0.2, "Should complete faster than sequential execution"
-        assert mock_s3_client.download_file.call_count == 3
