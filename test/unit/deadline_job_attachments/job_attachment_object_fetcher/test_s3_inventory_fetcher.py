@@ -5,7 +5,7 @@ import boto3
 import gzip
 import io
 
-from typing import List, Tuple
+from typing import List, Tuple, Set
 from unittest.mock import Mock, patch
 from datetime import datetime
 from botocore.exceptions import ClientError
@@ -73,7 +73,7 @@ class TestS3InventoryFetcher:
             inventory_lister_with_mock_data.list_common_prefixes_with_delimeter("queue-1/")
         )
 
-        expected_prefixes: set[str] = {"queue-1/job-1/", "queue-1/job-2/"}
+        expected_prefixes: Set[str] = {"queue-1/job-1/", "queue-1/job-2/"}
         assert set(result) == expected_prefixes
 
     def test_list_job_attachments_happy_path_matching_prefix(

@@ -247,7 +247,10 @@ def attachment_upload(
 @click.option(
     "--job-attachment-fetching-strategy",
     type=click.Choice(
-        [JobAttachmentFetchingStrategy.PAGINATION, JobAttachmentFetchingStrategy.INVENTORY],
+        [
+            JobAttachmentFetchingStrategy.PAGINATION.name,
+            JobAttachmentFetchingStrategy.INVENTORY.name,
+        ],
         case_sensitive=False,
     ),
     default=JobAttachmentFetchingStrategy.PAGINATION,
