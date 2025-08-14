@@ -26,7 +26,7 @@ from deadline.job_attachments.bucket_sweeper.bucket_sweeper_components import (
     _create_deletion_batch_job,
     SweeperDependencies,
 )
-from deadline.job_attachments.bucket_sweeper.job_attachments_sweeper import JobAttachmentsSweeper
+from deadline.job_attachments.bucket_sweeper.job_attachment_sweeper import JobAttachmentSweeper
 from deadline.job_attachments.bucket_sweeper.retention_record_handler import RetentionRecordHandler
 from deadline.job_attachments.models import FarmQueueJobTriple
 from deadline.job_attachments.progress_tracker import DownloadSummaryStatistics
@@ -369,7 +369,7 @@ def _attachment_sweep(
         job_attachment_fetching_strategy=job_attachment_fetching_strategy,
         job_attachments_file_key=job_attachments_file_key,
     )
-    sweeper: JobAttachmentsSweeper = components.sweeper
+    sweeper: JobAttachmentSweeper = components.sweeper
     job_attachment_s3_settings: JobAttachmentS3Settings = components.job_attachment_s3_settings
     retention_record_handler: RetentionRecordHandler = components.retention_record_handler
 

@@ -27,8 +27,7 @@ def _list_active_job_ids(
             Value: List of job IDs that are active in that queue
 
     Raises:
-        JobAttachmentsSweeperError: If there is a failure fetching job IDs from Deadline, wrapping
-            either DeadlineOperationError or JobFetchFailure
+        JobFetchFailure or DeadlineOperationError from list_job_by_filter_expression API
     """
     queue_job_id_map: Dict[str, List[str]] = {}
     filter_expression: Dict[str, Any] = {

@@ -4,17 +4,18 @@ import csv
 import boto3
 
 from datetime import datetime
+from pathlib import Path
 from typing import List, Dict, Any, Set
 from botocore.exceptions import BotoCoreError
 from botocore.client import BaseClient
 
 from ..exceptions import (
-    JobAttachmentsS3BucketListerError,
-    JobAttachmentsSweeperError,
+    JobAttachmentObjectFetcherError,
+    JobAttachmentSweeperError,
     JobAttachmentS3BotoCoreError,
     RetentionRecordHandlerError,
 )
-from ..job_attachments_s3_bucket_lister import JobAttachmentsS3BucketLister
+from ..job_attachment_object_fetcher import JobAttachmentObjectFetcher
 
 from deadline.job_attachments.models import RetentionRecord
 from deadline.job_attachments.bucket_sweeper.retention_record_handler import (
@@ -22,7 +23,7 @@ from deadline.job_attachments.bucket_sweeper.retention_record_handler import (
 )
 
 
-class JobAttachmentsSweeper:
+class JobAttachmentSweeper:
     """Processes cleanup operations for job attachments."""
 
     def __init__(
@@ -31,14 +32,14 @@ class JobAttachmentsSweeper:
         s3_control_client: BaseClient,
         deadline_client: BaseClient,
         retention_record_handler: RetentionRecordHandlerInterface,
-        job_attachments_s3_bucket_lister: JobAttachmentsS3BucketLister,
+        job_attachment_object_fetcher: JobAttachmentObjectFetcher,
         boto3_session: boto3.Session,
         role_arn: str,
         bucket_name: str,
         root_prefix: str,
     ):
         """
-        Initializes the JobAttachmentsSweeper.
+        Initializes the JobAttachmentSweeper.
 
         Note:
             IMPORTANT: Do not mix different lister implementations. S3 Inventory manifests
@@ -49,7 +50,7 @@ class JobAttachmentsSweeper:
             s3_client: AWS S3 client for basic S3 operations
             s3_control_client: AWS S3 Control client for batch operations
             deadline_client: Client for interacting with Deadline
-            job_attachments_s3_bucket_lister: Component to list job attachments from an S3 bucket
+            job_attachment_object_fetcher: Component to list job attachments from an S3 bucket
             boto3_session: boto3 session
             role_arn (str): The ARN of the IAM role for executing batch jobs.
                 Required permissions:
@@ -63,7 +64,7 @@ class JobAttachmentsSweeper:
         self.s3_control = s3_control_client
         self.deadline = deadline_client
         self.retention_record_handler = retention_record_handler
-        self.job_attachments_s3_bucket_lister = job_attachments_s3_bucket_lister
+        self.job_attachment_object_fetcher = job_attachment_object_fetcher
         self.boto3_session = boto3_session
         self.role_arn = role_arn
         self.bucket_name = bucket_name
@@ -108,7 +109,7 @@ class JobAttachmentsSweeper:
             List[str]: A list of extracted IDs from the common prefixes.
 
         Raises:
-            JobAttachmentsSweeperError: If there is an error listing common prefixes
+            JobAttachmentSweeperError: If there is an error listing common prefixes
                 from the S3 bucket.
 
         Notes:
@@ -121,7 +122,7 @@ class JobAttachmentsSweeper:
         try:
             for (
                 common_prefix
-            ) in self.job_attachments_s3_bucket_lister.list_common_prefixes_with_delimeter(
+            ) in self.job_attachment_object_fetcher.list_common_prefixes_with_delimeter(
                 prefix=prefix
             ):
                 split_common_prefix: List[str] = common_prefix.split("/")
@@ -132,8 +133,8 @@ class JobAttachmentsSweeper:
                 # Prefix ends with  "/", last element will be an empty string
                 id: str = split_common_prefix[-2]
                 ids.append(id)
-        except JobAttachmentsS3BucketListerError as err:
-            raise JobAttachmentsSweeperError(
+        except JobAttachmentObjectFetcherError as err:
+            raise JobAttachmentSweeperError(
                 message=f"Failed to list common prefixes: {str(err)}"
             ) from err
 
@@ -156,7 +157,7 @@ class JobAttachmentsSweeper:
             Set[str]: A set of unique S3 object keys that should be retained.
 
         Raises:
-            JobAttachmentsSweeperError: If there's an error retrieving retention records from the
+            JobAttachmentSweeperError: If there's an error retrieving retention records from the
                                     record handler.
 
         Note:
@@ -168,7 +169,7 @@ class JobAttachmentsSweeper:
                 queue_job_id_map=queue_job_id_map
             )
         except RetentionRecordHandlerError as err:
-            raise JobAttachmentsSweeperError(message=f"Failed to get retention records: {str(err)}")
+            raise JobAttachmentSweeperError(message=f"Failed to get retention records: {str(err)}")
 
         retain_object_keys: Set[str] = {record.s3_object_key for record in records}
 
@@ -199,7 +200,7 @@ class JobAttachmentsSweeper:
         """
         delete_list: List[str] = []
         try:
-            for s3_object in self.job_attachments_s3_bucket_lister.list_job_attachments(
+            for s3_object in self.job_attachment_object_fetcher.list_job_attachments(
                 prefix=root_prefix
             ):
                 if (
@@ -210,14 +211,14 @@ class JobAttachmentsSweeper:
                     continue
 
                 delete_list.append(s3_object.key)
-        except JobAttachmentsS3BucketListerError as err:
-            raise JobAttachmentsSweeperError(
+        except JobAttachmentObjectFetcherError as err:
+            raise JobAttachmentSweeperError(
                 message=f"Failed to list objects for deletion: {str(err)}"
             ) from err
 
         return delete_list
 
-    def _create_tag_manifest(self, file_path: str, delete_list: List[str]) -> None:
+    def _create_tag_manifest(self, file_path: Path, delete_list: List[str]) -> None:
         """
         Creates a CSV manifest file containing object keys to be deleted and writes it to
         the specified path on disk.
@@ -225,11 +226,11 @@ class JobAttachmentsSweeper:
         Each row in the CSV contains two columns: bucket name and object key.
 
         Args:
-            write_path (str): File path where the manifest file will be created
+            write_path (Path): File path where the manifest file will be created
             delete_list (List[str]): List of object keys to be included in the manifest
 
         Raises:
-            JobAttachmentsSweeperError: If the manifest file cannot be created due to
+            JobAttachmentSweeperError: If the manifest file cannot be created due to
                 file system permissions, disk space, or other I/O errors
         """
         csv_formatted_list: List[List[str]] = []
@@ -237,27 +238,25 @@ class JobAttachmentsSweeper:
             csv_formatted_list.append([self.bucket_name, obj_key])
 
         try:
-            with open(file_path, "w") as file:
+            with open(str(file_path), "w", newline="") as file:
                 writer = csv.writer(file)
                 writer.writerows(csv_formatted_list)
         except Exception as e:
-            raise JobAttachmentsSweeperError(message=f"Failed to create tag manifest: {str(e)}")
+            raise JobAttachmentSweeperError(message=f"Failed to create tag manifest: {str(e)}")
 
-        return file_path
-
-    def _upload_tag_manifest(self, manifest_path: str, object_key: str) -> None:
+    def _upload_tag_manifest(self, manifest_path: Path, object_key: str) -> None:
         """
         Upload CSV manifest to S3. Overwrites existing manifest if already present.
 
         Args:
-            manifest_path (str): Local path to the manifest file
+            manifest_path (Path): Local path to the manifest file
             object_key (str): S3 object key for the uploaded manifest
 
         Raises:
             JobAttachmentS3BotoCoreError: If any errors occur during the upload process
         """
         try:
-            self.s3.upload_file(manifest_path, self.bucket_name, object_key)
+            self.s3.upload_file(str(manifest_path), self.bucket_name, object_key)
         except BotoCoreError as e:
             raise JobAttachmentS3BotoCoreError(
                 action="uploading bucket sweeper tag manifest", error_details=str(e)
@@ -272,7 +271,7 @@ class JobAttachmentsSweeper:
 
         Raises:
             JobAttachmentS3BotoCoreError: When retrieving manifest metadata fails
-            JobAttachmentsSweeperError: When getting the manifest etag or creating the batch job fails
+            JobAttachmentSweeperError: When getting the manifest etag or creating the batch job fails
         """
         manifest_etag: str = self._get_manifest_etag(s3_manifest_key)
         manifest: Dict[str, Any] = {
@@ -303,7 +302,7 @@ class JobAttachmentsSweeper:
         Retrieves the ETag for the manifest file from S3.
 
         Raises:
-            JobAttachmentsSweeperError: when head_object operation succeeds but etag is None
+            JobAttachmentSweeperError: when head_object operation succeeds but etag is None
             JobAttachmentS3BotoCoreError: When S3 head_object operation fails
         """
         try:
@@ -313,7 +312,7 @@ class JobAttachmentsSweeper:
 
             etag: str = manifest_metadata.get("ETag", "")
             if not etag:
-                raise JobAttachmentsSweeperError(message="Missing etag in manifest metadata")
+                raise JobAttachmentSweeperError(message="Missing etag in manifest metadata")
 
             return etag
         except BotoCoreError as e:
@@ -338,7 +337,7 @@ class JobAttachmentsSweeper:
             priority (int, optional): The priority of the job (1-255, higher values = higher priority). Defaults to 10.
 
         Raises:
-            JobAttachmentsSweeperError: When job creation fails
+            JobAttachmentSweeperError: When job creation fails
 
         Note:
             The CLI client requires s3:CreateJob and iam:PassRole permissions to create a batch tagging job.
@@ -356,4 +355,4 @@ class JobAttachmentsSweeper:
                 Priority=priority,
             )
         except Exception as e:
-            raise JobAttachmentsSweeperError(f"Failed to create S3 batch operations job: {str(e)}")
+            raise JobAttachmentSweeperError(f"Failed to create S3 batch operations job: {str(e)}")

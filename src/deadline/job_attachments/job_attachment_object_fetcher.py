@@ -15,7 +15,7 @@ from botocore.client import BaseClient
 from botocore.exceptions import ClientError
 
 from .models import JobAttachmentS3Settings, S3ObjectData
-from .exceptions import JobAttachmentsS3BucketListerError
+from .exceptions import JobAttachmentObjectFetcherError
 
 from deadline.client.api._session import get_s3_client
 
@@ -26,7 +26,7 @@ GZIP_UNCOMPRESSED_TO_COMPRESSED_RATIO = 7
 MEMORY_THRESHOLD = 0.4
 
 
-class JobAttachmentsS3BucketLister(ABC):
+class JobAttachmentObjectFetcher(ABC):
     """Interface for listing job attachments from S3."""
 
     @abstractmethod
@@ -53,7 +53,7 @@ class JobAttachmentsS3BucketLister(ABC):
             Iterator[str]: Stream of common prefixes found
 
         Raises:
-            JobAttachmentsS3BucketListerError: If S3 listing fails
+            JobAttachmentObjectFetcherError: If S3 listing fails
         """
         raise NotImplementedError()
 
@@ -88,12 +88,12 @@ class JobAttachmentsS3BucketLister(ABC):
         raise NotImplementedError()
 
 
-class S3PaginationLister(JobAttachmentsS3BucketLister):
+class S3PaginationFetcher(JobAttachmentObjectFetcher):
     """Object fetcher that uses S3 pagination to list objects from S3."""
 
     def __init__(self, boto3_session: boto3.Session, settings: JobAttachmentS3Settings):
         """
-        Initialize the S3PaginationLister with AWS credentials and settings.
+        Initialize the S3PaginationFetcher with AWS credentials and settings.
 
         Args:
             boto3_session (boto3.Session): An initialized boto3 Session object containing
@@ -126,7 +126,7 @@ class S3PaginationLister(JobAttachmentsS3BucketLister):
             Iterator[str]: Stream of common prefixes found
 
         Raises:
-            JobAttachmentsS3BucketListerError: If S3 listing fails
+            JobAttachmentObjectFetcherError: If S3 listing fails
         """
         s3: BaseClient = get_s3_client(session=self.boto3_session)
         paginator: Paginator = s3.get_paginator("list_objects_v2")
@@ -138,7 +138,7 @@ class S3PaginationLister(JobAttachmentsS3BucketLister):
                 for object in page.get("CommonPrefixes", []):
                     yield object.get("Prefix")
         except ClientError as err:
-            raise JobAttachmentsS3BucketListerError(
+            raise JobAttachmentObjectFetcherError(
                 f"Failed to list job attachments from S3: {str(err)}"
             ) from err
 
@@ -172,7 +172,7 @@ class S3PaginationLister(JobAttachmentsS3BucketLister):
                         etag=object["ETag"],
                     )
         except ClientError as err:
-            raise JobAttachmentsS3BucketListerError(
+            raise JobAttachmentObjectFetcherError(
                 f"Failed to list job attachments from S3: {str(err)}"
             ) from err
 
@@ -200,7 +200,7 @@ class S3PaginationLister(JobAttachmentsS3BucketLister):
                 yield (prefix, object)
 
 
-class S3InventoryLister(JobAttachmentsS3BucketLister):
+class S3InventoryFetcher(JobAttachmentObjectFetcher):
     """
     Object fetcher that uses an S3 Inventory manifest to list objects from S3.
 
@@ -246,7 +246,7 @@ class S3InventoryLister(JobAttachmentsS3BucketLister):
             Iterator[str]: Stream of common prefixes found
 
         Raises:
-            JobAttachmentsS3BucketListerError: If S3 listing fails
+            JobAttachmentObjectFetcherError: If S3 listing fails
         """
         prefix_set: Set[str] = set()
 
@@ -307,12 +307,12 @@ class S3InventoryLister(JobAttachmentsS3BucketLister):
     def _get_s3_inventory_manifest(self) -> List[S3ObjectData]:
         """
         Downloads and parses S3 inventory manifest file, returning object metadata.
-        
+
         Returns:
             List of S3ObjectData containing key, size, last_modified, and etag for each object.
-            
+
         Raises:
-            JobAttachmentsS3BucketListerError: If download fails or manifest cannot be loaded into memory.
+            JobAttachmentObjectFetcherError: If download fails or manifest cannot be loaded into memory.
         """
         self._check_manifest_file_size_fits_into_memory()
 
@@ -342,11 +342,11 @@ class S3InventoryLister(JobAttachmentsS3BucketLister):
                 for row in csv_reader
             ]
         except ClientError as err:
-            raise JobAttachmentsS3BucketListerError(
+            raise JobAttachmentObjectFetcherError(
                 f"Failed to download S3 Inventory manifest from S3: {str(err)}"
             ) from err
         except MemoryError as err:
-            raise JobAttachmentsS3BucketListerError(
+            raise JobAttachmentObjectFetcherError(
                 f"Failed to load S3 Inventory manifest into memory: {str(err)}"
             ) from err
 
@@ -355,7 +355,7 @@ class S3InventoryLister(JobAttachmentsS3BucketLister):
         Check if the manifest file is too large to be loaded into memory.
 
         Raises:
-            JobAttachmentsS3BucketListerError: if inventory manifest is too large to fit in memory
+            JobAttachmentObjectFetcherError: if inventory manifest is too large to fit in memory
         """
         response: Dict[str, Any] = self.s3_client.head_object(
             Bucket=self.s3_settings.s3BucketName, Key=self.job_attachments_file_key
@@ -369,6 +369,6 @@ class S3InventoryLister(JobAttachmentsS3BucketLister):
         available_memory_with_threshold: int = psutil.virtual_memory().available * MEMORY_THRESHOLD
 
         if estimated_uncompressed_size >= available_memory_with_threshold:
-            raise JobAttachmentsS3BucketListerError(
+            raise JobAttachmentObjectFetcherError(
                 "S3 Inventory manifest is too large for available memory"
             )

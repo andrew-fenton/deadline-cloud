@@ -8,11 +8,11 @@ from datetime import datetime
 from botocore.client import BaseClient
 
 from .retention_record_handler import RetentionRecordHandler
-from .job_attachments_sweeper import JobAttachmentsSweeper
+from .job_attachment_sweeper import JobAttachmentSweeper
 from ..job_attachment_object_fetcher_strategy import (
     JobAttachmentObjectFetcherFactory,
 )
-from ..job_attachments_s3_bucket_lister import JobAttachmentsS3BucketLister
+from ..job_attachment_object_fetcher import JobAttachmentObjectFetcher
 from ..models import (
     AssetHash,
     FarmQueueJobTriple,
@@ -34,7 +34,7 @@ from deadline.client.api._list_active_job_ids import _list_active_job_ids
 class SweeperDependencies(NamedTuple):
     """Tuple to enforce components returned by the initialization function"""
 
-    sweeper: JobAttachmentsSweeper
+    sweeper: JobAttachmentSweeper
     job_attachment_s3_settings: JobAttachmentS3Settings
     retention_record_handler: RetentionRecordHandler
 
@@ -80,7 +80,7 @@ def _initialize_dependencies(
         storage_file_path=working_directory / "storage_file.json"
     )
 
-    job_attachments_object_fetcher: JobAttachmentsS3BucketLister = (
+    job_attachments_object_fetcher: JobAttachmentObjectFetcher = (
         JobAttachmentObjectFetcherFactory.create(
             strategy=job_attachment_fetching_strategy,
             boto3_session=boto3_session,
@@ -89,12 +89,12 @@ def _initialize_dependencies(
         )
     )
 
-    sweeper: JobAttachmentsSweeper = JobAttachmentsSweeper(
+    sweeper: JobAttachmentSweeper = JobAttachmentSweeper(
         s3_client=s3_client,
         s3_control_client=s3_control_client,
         deadline_client=deadline_client,
         retention_record_handler=retention_record_handler,
-        job_attachments_s3_bucket_lister=job_attachments_object_fetcher,
+        job_attachment_object_fetcher=job_attachments_object_fetcher,
         boto3_session=boto3_session,
         role_arn=role_arn,
         bucket_name=bucket_name,
@@ -109,7 +109,7 @@ def _initialize_dependencies(
 
 
 def _collect_farm_queue_job_triples(
-    sweeper: JobAttachmentsSweeper,
+    sweeper: JobAttachmentSweeper,
     boto3_session: boto3.Session,
     retention_datetime: datetime,
 ) -> List[FarmQueueJobTriple]:
@@ -125,7 +125,7 @@ def _collect_farm_queue_job_triples(
         compilation phase by checking their last_modified_date.
 
     Args:
-        sweeper: The JobAttachmentsSweeper instance used to retrieve farm-queue mappings
+        sweeper: The JobAttachmentSweeper instance used to retrieve farm-queue mappings
         boto3_session: AWS session for making API calls to list jobs
         retention_datetime: Jobs that ended before this datetime are candidates for cleanup, ones
             that ended after or at this datetime will be retained
@@ -232,7 +232,7 @@ def _process_manifests_and_create_retention_records(
 
 def _determine_objects_to_delete(
     farm_queue_job_triples: List[FarmQueueJobTriple],
-    sweeper: JobAttachmentsSweeper,
+    sweeper: JobAttachmentSweeper,
     retention_datetime: datetime,
     root_prefix: str,
 ) -> List[str]:
@@ -247,7 +247,7 @@ def _determine_objects_to_delete(
     Args:
         farm_queue_job_triples: List of (farm_id, queue_id, job_id) tuples representing
             the jobs to consider for retention analysis.
-        sweeper: The JobAttachmentsSweeper instance used to query S3 and determine
+        sweeper: The JobAttachmentSweeper instance used to query S3 and determine
             retention and deletion candidates.
         retention_datetime: The cutoff datetime - objects modified before this time
             may be eligible for deletion if not otherwise retained.
@@ -279,7 +279,7 @@ def _determine_objects_to_delete(
 
 def _create_deletion_batch_job(
     delete_list: List[str],
-    sweeper: JobAttachmentsSweeper,
+    sweeper: JobAttachmentSweeper,
     working_directory: Path,
     root_prefix: str,
     dry_run: bool,
@@ -294,7 +294,7 @@ def _create_deletion_batch_job(
 
     Args:
         delete_list: List of S3 object keys to be deleted
-        sweeper: JobAttachmentsSweeper instance used for manifest operations
+        sweeper: JobAttachmentSweeper instance used for manifest operations
         working_directory: Local directory path where temporary files are created
         root_prefix: S3 key prefix used for organizing uploaded manifest files
         dry_run: flag for creating s3 batch job

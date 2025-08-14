@@ -1,23 +1,22 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 
 import pytest
-import os
 import csv
 
 from datetime import datetime
 from typing import Dict, List, Any, Set
 from pathlib import Path
 from botocore.exceptions import BotoCoreError
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from deadline.job_attachments.models import (
     RetentionRecord,
     S3ObjectData,
 )
-from deadline.job_attachments.bucket_sweeper.job_attachments_sweeper import JobAttachmentsSweeper
+from deadline.job_attachments.bucket_sweeper.job_attachment_sweeper import JobAttachmentSweeper
 from deadline.job_attachments.exceptions import (
-    JobAttachmentsS3BucketListerError,
-    JobAttachmentsSweeperError,
+    JobAttachmentObjectFetcherError,
+    JobAttachmentSweeperError,
     JobAttachmentS3BotoCoreError,
     RetentionRecordHandlerError,
 )
@@ -60,21 +59,21 @@ def mock_lister() -> Mock:
 
 
 @pytest.fixture
-def processor(
+def sweeper(
     mock_boto3_session: Mock,
     mock_s3: Mock,
     mock_s3_control: Mock,
     mock_deadline: Mock,
     mock_record_handler: Mock,
     mock_lister: Mock,
-) -> JobAttachmentsSweeper:
-    """Fixture to create JobAttachmentsSweeper instance with mock clients"""
-    return JobAttachmentsSweeper(
+) -> JobAttachmentSweeper:
+    """Fixture to create JobAttachmentSweeper instance with mock clients"""
+    return JobAttachmentSweeper(
         s3_client=mock_s3,
         s3_control_client=mock_s3_control,
         deadline_client=mock_deadline,
         retention_record_handler=mock_record_handler,
-        job_attachments_s3_bucket_lister=mock_lister,
+        job_attachment_object_fetcher=mock_lister,
         boto3_session=mock_boto3_session,
         role_arn="test-role-arn",
         bucket_name="test-bucket",
@@ -91,8 +90,10 @@ def test_dir(tmp_path: Path) -> Path:
     return test_directory
 
 
-class TestJobAttachmentsSweeper:
-    def test_get_attachments_to_retain_happy_path(self, processor: JobAttachmentsSweeper):
+class TestJobAttachmentSweeper:
+    def test_get_attachments_to_retain_happy_path(
+        self, sweeper: JobAttachmentSweeper, mock_record_handler: Mock
+    ):
         """Tests retrieving attachments to retain with multiple queues and jobs."""
         queue_job_id_map: Dict[str, List[str]] = {
             "queue-1": ["job-1"],
@@ -106,16 +107,18 @@ class TestJobAttachmentsSweeper:
             RetentionRecord(queue_id="queue-3", job_id="job-3", s3_object_key="key-3"),
         ]
 
-        processor.retention_record_handler.get_retention_records.return_value = mock_records
+        mock_record_handler.get_retention_records.return_value = mock_records
 
-        result: Set[str] = processor.get_attachments_to_retain(queue_job_id_map)
+        result: Set[str] = sweeper.get_attachments_to_retain(queue_job_id_map)
 
-        processor.retention_record_handler.get_retention_records.assert_called_once_with(
+        mock_record_handler.get_retention_records.assert_called_once_with(
             queue_job_id_map=queue_job_id_map
         )
         assert result == {"key-1", "key-2", "key-3"}
 
-    def test_get_attachments_to_retain_deduplication(self, processor: JobAttachmentsSweeper):
+    def test_get_attachments_to_retain_deduplication(
+        self, sweeper: JobAttachmentSweeper, mock_record_handler: Mock
+    ):
         """Tests deduplication of attachment keys."""
         queue_job_id_map: Dict[str, List[str]] = {"queue-1": ["job-1", "job-2"]}
 
@@ -127,53 +130,58 @@ class TestJobAttachmentsSweeper:
             RetentionRecord(queue_id="queue-1", job_id="job-2", s3_object_key="key-2"),
         ]
 
-        processor.retention_record_handler.get_retention_records.return_value = mock_records
+        mock_record_handler.get_retention_records.return_value = mock_records
 
-        result: Set[str] = processor.get_attachments_to_retain(queue_job_id_map)
+        result: Set[str] = sweeper.get_attachments_to_retain(queue_job_id_map)
 
         assert len(result) == 2
         assert result == {"key-1", "key-2"}
 
-    def test_get_attachments_to_retain_empty_map(self, processor: JobAttachmentsSweeper):
+    def test_get_attachments_to_retain_empty_map(
+        self, sweeper: JobAttachmentSweeper, mock_record_handler: Mock
+    ):
         """Tests behavior with empty queue job map."""
         queue_job_id_map: Dict[str, List[str]] = {}
 
-        processor.retention_record_handler.get_retention_records.return_value = []
+        mock_record_handler.get_retention_records.return_value = []
 
-        result: Set[str] = processor.get_attachments_to_retain(queue_job_id_map)
+        result: Set[str] = sweeper.get_attachments_to_retain(queue_job_id_map)
 
-        processor.retention_record_handler.get_retention_records.assert_called_once_with(
+        mock_record_handler.get_retention_records.assert_called_once_with(
             queue_job_id_map=queue_job_id_map
         )
         assert result == set()
 
-    def test_get_attachments_to_retain_handler_error(self, processor: JobAttachmentsSweeper):
+    def test_get_attachments_to_retain_handler_error(
+        self, sweeper: JobAttachmentSweeper, mock_record_handler: Mock
+    ):
         """Tests error handling when record handler fails."""
         queue_job_id_map: Dict[str, List[str]] = {"queue-1": ["job-1"]}
 
         error_message: str = "Failed to retrieve records"
-        processor.retention_record_handler.get_retention_records.side_effect = (
-            RetentionRecordHandlerError(error_message)
+        mock_record_handler.get_retention_records.side_effect = RetentionRecordHandlerError(
+            error_message
         )
 
-        with pytest.raises(JobAttachmentsSweeperError) as err:
-            processor.get_attachments_to_retain(queue_job_id_map)
+        with pytest.raises(JobAttachmentSweeperError) as err:
+            sweeper.get_attachments_to_retain(queue_job_id_map)
 
         assert "Failed to get retention records" in str(err.value)
         assert error_message in str(err.value)
 
-    def test_get_queues_in_farms_from_s3_happy_path(self, processor: JobAttachmentsSweeper):
+    def test_get_queues_in_farms_from_s3_happy_path(self, sweeper: JobAttachmentSweeper):
         """Test successfully retrieving queues for multiple farms."""
-        mock_get_ids: Mock = Mock()
-        mock_get_ids.side_effect = [
+        side_effect_values = [
             ["farm-123", "farm-456"],  # First call for farm IDs
             ["queue-1", "queue-2"],  # Second call for farm-123 queues
             ["queue-3"],  # Third call for farm-456 queues
         ]
 
-        processor._get_ids_from_common_prefixes = mock_get_ids
-
-        result: Dict[str, List[str]] = processor.get_queues_in_farms_from_s3()
+        with patch(
+            "deadline.job_attachments.bucket_sweeper.job_attachment_sweeper.JobAttachmentSweeper._get_ids_from_common_prefixes",
+            side_effect=side_effect_values,
+        ):
+            result: Dict[str, List[str]] = sweeper.get_queues_in_farms_from_s3()
 
         expected: Dict[str, List[str]] = {
             "farm-123": ["queue-1", "queue-2"],
@@ -183,61 +191,64 @@ class TestJobAttachmentsSweeper:
         assert len(result) == 2
         assert result == expected
 
-    def test_get_queues_in_farms_from_s3_no_queues(self, processor: JobAttachmentsSweeper):
+    def test_get_queues_in_farms_from_s3_no_queues(self, sweeper: JobAttachmentSweeper):
         """Test when there are no queue_ids returned by _get_ids_from_common_prefixes."""
-        mock_get_ids: Mock = Mock()
-        mock_get_ids.side_effect = [
+        side_effect_values = [
             ["farm-123", "farm-456"],  # First call for farm IDs
             [],  # Second call for farm-123 queues
             [],  # Third call for farm-456 queues
         ]
 
-        processor._get_ids_from_common_prefixes = mock_get_ids
-
-        result: Dict[str, List[str]] = processor.get_queues_in_farms_from_s3()
+        with patch(
+            "deadline.job_attachments.bucket_sweeper.job_attachment_sweeper.JobAttachmentSweeper._get_ids_from_common_prefixes",
+            side_effect=side_effect_values,
+        ):
+            result: Dict[str, List[str]] = sweeper.get_queues_in_farms_from_s3()
 
         assert len(result) == 0
         assert result == {}
 
-    def test_get_ids_from_common_prefixes_happy_path(self, processor: JobAttachmentsSweeper):
+    def test_get_ids_from_common_prefixes_happy_path(
+        self, sweeper: JobAttachmentSweeper, mock_lister: Mock
+    ):
         """Test successfully getting IDs from common prefixes."""
         mock_prefixes = ["test/123/", "test/456/", "test/789/"]
-        processor.job_attachments_s3_bucket_lister.list_common_prefixes_with_delimeter.return_value = mock_prefixes
+        mock_lister.list_common_prefixes_with_delimeter.return_value = mock_prefixes
 
-        result = processor._get_ids_from_common_prefixes("test/")
+        result = sweeper._get_ids_from_common_prefixes("test/")
 
         assert result == ["123", "456", "789"]
-        processor.job_attachments_s3_bucket_lister.list_common_prefixes_with_delimeter.assert_called_once_with(
-            prefix="test/"
-        )
+        mock_lister.list_common_prefixes_with_delimeter.assert_called_once_with(prefix="test/")
 
-    def test_get_ids_from_common_prefixes_none_exist(self, processor: JobAttachmentsSweeper):
+    def test_get_ids_from_common_prefixes_none_exist(
+        self, sweeper: JobAttachmentSweeper, mock_lister: Mock
+    ):
         """Test getting IDs when no prefixes exist."""
-        processor.job_attachments_s3_bucket_lister.list_common_prefixes_with_delimeter.return_value = []
+        mock_lister.list_common_prefixes_with_delimeter.return_value = []
 
-        result = processor._get_ids_from_common_prefixes("test/")
+        result = sweeper._get_ids_from_common_prefixes("test/")
 
         assert result == []
-        processor.job_attachments_s3_bucket_lister.list_common_prefixes_with_delimeter.assert_called_once_with(
-            prefix="test/"
-        )
+        mock_lister.list_common_prefixes_with_delimeter.assert_called_once_with(prefix="test/")
 
-    def test_get_ids_from_common_prefixes_lister_error(self, processor: JobAttachmentsSweeper):
+    def test_get_ids_from_common_prefixes_lister_error(
+        self, sweeper: JobAttachmentSweeper, mock_lister: Mock
+    ):
         """Test getting IDs when lister throws an error."""
         error_message = "Failed to list common prefixes"
-        processor.job_attachments_s3_bucket_lister.list_common_prefixes_with_delimeter.side_effect = JobAttachmentsS3BucketListerError(
-            error_message
+        mock_lister.list_common_prefixes_with_delimeter.side_effect = (
+            JobAttachmentObjectFetcherError(error_message)
         )
 
-        with pytest.raises(JobAttachmentsSweeperError) as err:
-            processor._get_ids_from_common_prefixes("test/")
+        with pytest.raises(JobAttachmentSweeperError) as err:
+            sweeper._get_ids_from_common_prefixes("test/")
 
         assert error_message in str(err.value)
-        processor.job_attachments_s3_bucket_lister.list_common_prefixes_with_delimeter.assert_called_once_with(
-            prefix="test/"
-        )
+        mock_lister.list_common_prefixes_with_delimeter.assert_called_once_with(prefix="test/")
 
-    def test_get_attachments_to_delete_filter_with_datetime(self, processor: JobAttachmentsSweeper):
+    def test_get_attachments_to_delete_filter_with_datetime(
+        self, sweeper: JobAttachmentSweeper, mock_lister: Mock
+    ):
         """Test when s3_keys_to_retain is empty - should return all objects modified after retention_datetime."""
         mock_objects: List[S3ObjectData] = [
             S3ObjectData(
@@ -247,22 +258,20 @@ class TestJobAttachmentsSweeper:
                 key="retain_this", size=200, last_modified=datetime(2025, 1, 3), etag="etag2"
             ),
         ]
-        processor.job_attachments_s3_bucket_lister.list_job_attachments.return_value = mock_objects
+        mock_lister.list_job_attachments.return_value = mock_objects
 
         retention_datetime: datetime = datetime(2025, 1, 2)
-        result: List[str] = processor.get_attachments_to_delete(
-            s3_keys_to_retain=[],  # calling with empty list
+        result: List[str] = sweeper.get_attachments_to_delete(
+            s3_keys_to_retain=set(),  # calling with empty set
             retention_datetime=retention_datetime,
             root_prefix="test/",
         )
 
         assert result == ["delete_this"]
-        processor.job_attachments_s3_bucket_lister.list_job_attachments.assert_called_once_with(
-            prefix="test/"
-        )
+        mock_lister.list_job_attachments.assert_called_once_with(prefix="test/")
 
     def test_get_attachments_to_delete_object_filter_with_retain_set(
-        self, processor: JobAttachmentsSweeper
+        self, sweeper: JobAttachmentSweeper, mock_lister: Mock
     ):
         """Test when object key is in s3_keys_to_retain - should not be included in delete list."""
         mock_objects: List[S3ObjectData] = [
@@ -273,32 +282,32 @@ class TestJobAttachmentsSweeper:
                 key="retain_this", size=100, last_modified=datetime(2025, 1, 1), etag="etag1"
             ),
         ]
-        processor.job_attachments_s3_bucket_lister.list_job_attachments.return_value = mock_objects
+        mock_lister.list_job_attachments.return_value = mock_objects
 
         retention_datetime: datetime = datetime(2025, 1, 2)
-        result: List[str] = processor.get_attachments_to_delete(
-            s3_keys_to_retain=["retain_this"],
+        result: List[str] = sweeper.get_attachments_to_delete(
+            s3_keys_to_retain={"retain_this"},
             retention_datetime=retention_datetime,
             root_prefix="test/",
         )
 
         assert result == ["delete_this"]
-        processor.job_attachments_s3_bucket_lister.list_job_attachments.assert_called_once_with(
-            prefix="test/"
-        )
+        mock_lister.list_job_attachments.assert_called_once_with(prefix="test/")
 
-    def test_get_attachments_to_delete_handles_lister_error(self, processor: JobAttachmentsSweeper):
+    def test_get_attachments_to_delete_handles_lister_error(
+        self, sweeper: JobAttachmentSweeper, mock_lister: Mock
+    ):
         """Test that the function properly handles errors from the lister."""
         error_message: str = "Error with listing function"
-        processor.job_attachments_s3_bucket_lister.list_job_attachments.side_effect = (
-            JobAttachmentsS3BucketListerError(error_message)
+        mock_lister.list_job_attachments.side_effect = JobAttachmentObjectFetcherError(
+            error_message
         )
 
         retention_datetime: datetime = datetime(2025, 1, 2)
 
-        with pytest.raises(JobAttachmentsSweeperError) as err:
-            processor.get_attachments_to_delete(
-                s3_keys_to_retain=["key1"],
+        with pytest.raises(JobAttachmentSweeperError) as err:
+            sweeper.get_attachments_to_delete(
+                s3_keys_to_retain={"key1"},
                 retention_datetime=retention_datetime,
                 root_prefix="test/",
             )
@@ -306,24 +315,22 @@ class TestJobAttachmentsSweeper:
         assert "Failed to list objects for deletion" in str(err.value)
         assert error_message in str(err.value)
 
-        processor.job_attachments_s3_bucket_lister.list_job_attachments.assert_called_once_with(
-            prefix="test/"
-        )
+        mock_lister.list_job_attachments.assert_called_once_with(prefix="test/")
 
         # Verify that the original error is preserved in the exception chain
-        assert isinstance(err.value.__cause__, JobAttachmentsS3BucketListerError)
+        assert isinstance(err.value.__cause__, JobAttachmentObjectFetcherError)
 
-    def test_create_tag_manifest_empty_list(self, processor: JobAttachmentsSweeper, test_dir: Path):
+    def test_create_tag_manifest_empty_list(self, sweeper: JobAttachmentSweeper, test_dir: Path):
         """Test creating a tag manifest with an empty delete list."""
-        test_file_path = test_dir / "empty_manifest.csv"
-        manifest_path: str = processor._create_tag_manifest(str(test_file_path), [])
+        test_file_path: Path = test_dir / "empty_manifest.csv"
+        sweeper._create_tag_manifest(test_file_path, [])
 
-        with open(manifest_path, "r") as file:
+        with open(str(test_file_path), "r") as file:
             assert file.read() == ""
 
     def test_create_tag_manifest_io_error(
         self,
-        processor: JobAttachmentsSweeper,
+        sweeper: JobAttachmentSweeper,
         test_dir: Path,
         monkeypatch: pytest.MonkeyPatch,
     ):
@@ -334,12 +341,12 @@ class TestJobAttachmentsSweeper:
 
         monkeypatch.setattr("builtins.open", mock_open)
 
-        with pytest.raises(JobAttachmentsSweeperError) as raised_error:
-            processor._create_tag_manifest(str(test_dir), ["object_key"])
+        with pytest.raises(JobAttachmentSweeperError) as raised_error:
+            sweeper._create_tag_manifest(test_dir, ["object_key"])
 
             assert str(raised_error) == "Mocked IO Error"
 
-    def test_create_tag_manifest(self, processor: JobAttachmentsSweeper, test_dir: Path):
+    def test_create_tag_manifest(self, sweeper: JobAttachmentSweeper, test_dir: Path):
         """Create a tag manifest and validate CSV content."""
 
         # Sample data
@@ -349,13 +356,13 @@ class TestJobAttachmentsSweeper:
             "DeadlineCloud/Data/hash.xx128",
         ]
 
-        test_file_path = test_dir / "tag_manifest.csv"
-        manifest_path: str = processor._create_tag_manifest(str(test_file_path), delete_list)
+        test_file_path: Path = test_dir / "tag_manifest.csv"
+        sweeper._create_tag_manifest(test_file_path, delete_list)
 
-        assert os.path.exists(manifest_path)
+        assert test_file_path.exists()
 
         # Validate CSV output
-        with open(manifest_path, "r") as file:
+        with open(str(test_file_path), "r") as file:
             reader = csv.reader(file)
             rows: List[List[str]] = list(reader)
 
@@ -367,64 +374,66 @@ class TestJobAttachmentsSweeper:
         ])
         # fmt: on
 
-    def test_upload_tag_manifest(self, processor: JobAttachmentsSweeper, mock_s3: Mock):
+    def test_upload_tag_manifest(
+        self, sweeper: JobAttachmentSweeper, mock_s3: Mock, test_dir: Path
+    ):
         """Test uploading an existing CSV file to S3."""
 
-        manifest_path: str = "test/tag_manifest.csv"
+        manifest_path: Path = test_dir / "tag_manifest.csv"
         object_key: str = "DeadlineCloud/BucketSweeper/tag_manifest.csv"
-        processor._upload_tag_manifest(manifest_path, object_key)
+        sweeper._upload_tag_manifest(manifest_path, object_key)
 
         # Validate S3 call
         mock_s3.upload_file.assert_called_once_with(
-            manifest_path,
+            str(manifest_path),
             "test-bucket",
             object_key,
         )
 
-    def test_upload_tag_manifest_s3_error(self, processor: JobAttachmentsSweeper, mock_s3: Mock):
+    def test_upload_tag_manifest_s3_error(
+        self, sweeper: JobAttachmentSweeper, mock_s3: Mock, test_dir: Path
+    ):
         """Test uploading manifest when s3 upload fails."""
         mock_s3.upload_file.side_effect = BotoCoreError()
 
         with pytest.raises(JobAttachmentS3BotoCoreError):
-            processor._upload_tag_manifest("test.csv", "test_key")
+            sweeper._upload_tag_manifest(test_dir / "test.csv", "test_key")
 
-    def test_get_manifest_etag_value_error(self, processor: JobAttachmentsSweeper, mock_s3: Mock):
+    def test_get_manifest_etag_value_error(self, sweeper: JobAttachmentSweeper, mock_s3: Mock):
         """Test _get_manifest_etag method."""
         mock_s3.head_object.return_value = {"ETag": None}
 
-        with pytest.raises(JobAttachmentsSweeperError):
-            processor._get_manifest_etag("test_key")
+        with pytest.raises(JobAttachmentSweeperError):
+            sweeper._get_manifest_etag("test_key")
 
-    def test_get_manifest_etag(self, processor: JobAttachmentsSweeper, mock_s3: Mock):
+    def test_get_manifest_etag(self, sweeper: JobAttachmentSweeper, mock_s3: Mock):
         """Test _get_manifest_etag method."""
         mock_s3.head_object.return_value = {"ETag": "test-etag"}
 
-        etag: str = processor._get_manifest_etag("test_key")
+        etag: str = sweeper._get_manifest_etag("test_key")
         assert etag == "test-etag"
 
         mock_s3.head_object.assert_called_once_with(Bucket="test-bucket", Key="test_key")
 
-    def test_get_manifest_etag_botocore_error(
-        self, processor: JobAttachmentsSweeper, mock_s3: Mock
-    ):
+    def test_get_manifest_etag_botocore_error(self, sweeper: JobAttachmentSweeper, mock_s3: Mock):
         """Test _get_manifest_etag when head_object call fails."""
         mock_s3.head_object.side_effect = BotoCoreError()
 
         with pytest.raises(JobAttachmentS3BotoCoreError):
-            processor._get_manifest_etag("test_key")
+            sweeper._get_manifest_etag("test_key")
 
     def test_submit_tagging_batch_job_error(
-        self, processor: JobAttachmentsSweeper, mock_s3_control: Mock
+        self, sweeper: JobAttachmentSweeper, mock_s3_control: Mock
     ):
         """Test _submit_tagging_batch_job when job creation fails."""
         mock_s3_control.create_job.side_effect = Exception("Mocked error")
 
-        with pytest.raises(JobAttachmentsSweeperError):
-            processor._submit_tagging_batch_job({}, {})
+        with pytest.raises(JobAttachmentSweeperError):
+            sweeper._submit_tagging_batch_job({}, {})
 
     def test_create_batch_tag_s3_job(
         self,
-        processor: JobAttachmentsSweeper,
+        sweeper: JobAttachmentSweeper,
         mock_boto3_session: Mock,
         mock_s3: Mock,
         mock_s3_control: Mock,
@@ -440,7 +449,7 @@ class TestJobAttachmentsSweeper:
         }
 
         # Call method
-        processor._create_batch_tag_s3_job(s3_manifest_key)
+        sweeper._create_batch_tag_s3_job(s3_manifest_key)
 
         # Verify S3 Control create_job was called correctly
         expected_operation: Dict[str, Any] = {
